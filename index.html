@@ -165,6 +165,49 @@ tr.event td{color:var(--muted)}
 .reset{display:flex;flex-direction:column;gap:10px;align-items:flex-start;border-top:1px solid var(--line);padding-top:14px}
 @media (max-width:420px){.stat b{font-size:20px}.log li{grid-template-columns:1fr auto}.log li span:first-child{grid-column:1/-1}}
 
+/* practice modes v2 */
+.tab .tc{font-size:12px;font-weight:700;color:var(--muted);margin-left:2px;font-variant-numeric:tabular-nums}
+.tab[aria-selected="true"] .tc{color:var(--ink)}
+.mode:disabled{opacity:.45;cursor:default;transform:none}
+.mode:disabled:hover{border-color:var(--line)}
+.modes .mode:nth-child(n){min-width:0}
+.center{justify-content:center}
+.row.small{gap:8px}
+.toggle{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700}
+.toggle[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.flip{position:relative;perspective:1200px;cursor:pointer;touch-action:pan-y;user-select:none;-webkit-user-select:none;outline:none}
+.flip:focus-visible .face{outline:3px solid var(--mark);outline-offset:2px}
+.flip-in{position:relative;min-height:260px;transform-style:preserve-3d;transition:transform .45s cubic-bezier(.3,.7,.3,1)}
+.flip-in.on{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:var(--surface);border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px 20px 34px;text-align:center}
+.face.back{transform:rotateY(180deg);background:var(--navy);color:var(--navy-fg);border-color:var(--navy)}
+.face.back .note{color:var(--navy-fg);opacity:.75}
+.face .no{position:absolute;top:14px;left:18px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.04em}
+.face.back .no{color:var(--navy-fg);opacity:.7}
+.face .hint{position:absolute;bottom:14px;left:0;right:0;font-size:12px;color:var(--muted)}
+.face .big{font-family:var(--f-word);font-size:clamp(30px,9vw,44px);line-height:1.15;overflow-wrap:anywhere}
+.big-ko{font-size:clamp(20px,6vw,26px)!important;font-weight:700;line-height:1.4;overflow-wrap:anywhere}
+.star{position:absolute;top:8px;right:8px;width:44px;height:44px;border:0;background:none;color:var(--muted);display:grid;place-items:center;z-index:2;border-radius:50%}
+.star svg{width:24px;height:24px}
+.star.on{color:#e0a800}
+.flip-in.on ~ .star{color:var(--navy-fg)}
+.flip-in.on ~ .star.on{color:var(--mark)}
+.choice.en{font-family:var(--f-word);font-size:18px}
+.mask{font-family:var(--f-word);font-size:22px;letter-spacing:.06em;color:var(--muted);overflow-wrap:anywhere}
+.timer{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;transition:color .2s}
+.timer.pen{color:var(--bad)}
+.match{display:grid;grid-template-columns:repeat(var(--cols),1fr);gap:8px}
+.tile{min-height:84px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:8px 6px;font-size:14px;font-weight:700;line-height:1.3;overflow-wrap:anywhere;word-break:keep-all;transition:transform .12s,background .15s,opacity .25s;min-width:0}
+.tile.en{font-family:var(--f-word);font-weight:400;font-size:15px}
+.tile.sel{border-color:var(--ink);background:var(--mark);color:var(--mark-ink);transform:scale(1.03)}
+.tile.ok{background:var(--good-bg);border-color:var(--good);color:var(--good)}
+.tile.no{background:var(--bad-bg);border-color:var(--bad);color:var(--bad);animation:shake .35s}
+.tile.gone{opacity:0;pointer-events:none}
+@keyframes shake{20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}
+.done{font-size:13px;grid-column:2;grid-row:2/4;align-self:center}
+@media (max-width:380px){.tile{font-size:13px;min-height:76px}.tile.en{font-size:14px}}
+@media (prefers-reduced-motion:reduce){.flip-in{transition:none}.tile.no{animation:none}}
+
 </style>
 </head>
 <body>
@@ -179,6 +222,7 @@ tr.event td{color:var(--muted)}
 const BASE_URL = "";  // 비워 두면 지금 접속한 주소를 그대로 씁니다
 const BOOK = window.WORD_BOOK || "영어 학습지 단어";
 const PAGES = window.WORD_PAGES || [];
+PAGES.forEach(p => p.w.forEach(w => { w.pid = p.id; }));   // remember each word's page
 const ALL = {id: 'all', t: '전체 페이지', w: PAGES.flatMap(p => p.w)};
 
 const $app = document.getElementById('app');
@@ -243,7 +287,7 @@ async function api(action, data){
   if (!res.ok) throw res;
   return res;
 }
-function setAuth(a){ AUTH = a; store.set('wordroom-auth', a); }
+function setAuth(a){ AUTH = a; store.set('wordroom-auth', a); viewHome.synced = false; }
 function logout(){ setAuth(null); LOGIN ? viewLogin(route) : route(); }
 function onAuthError(e, retry){
   if (e && e.code === 'auth') { setAuth(null); toast('다시 로그인해 주세요'); viewLogin(retry || route); return true; }
@@ -481,7 +525,7 @@ async function viewAdmin(){
 
 /* ---------- page picker ---------- */
 function viewPages(){
-  SET = null; origin = 'pages';
+  SET = null; origin = 'pages'; SCOPE = 'all';
   const last = id => { const r = store.get(lastKey(id), null); return r ? `<span class="best">최근 ${esc(r.m)} ${r.s}/${r.n}</span>` : ''; };
   $app.innerHTML = `${header()}${userBar()}
   <div class="setcard"><div class="eyebrow">단어 연습</div><h1>학습지 페이지를 골라요</h1><div class="meta">총 ${ALL.w.length}개 단어 · ${PAGES.length}개 구간</div></div>
@@ -496,108 +540,220 @@ function viewPages(){
   scrollTo(0, 0);
 }
 
+/* ---------- confusing words: missed in a quiz or starred on a card; kept per student, merged with the server's record ---------- */
+const wkey = w => (w.pid || (SET && SET.id) || '') + '|' + w[0];
+const confKey = () => 'wordroom-confused-' + (AUTH ? AUTH.sid : 'guest');
+function confLoad(){ const c = store.get(confKey(), null); return c && c.items ? c : {items: {}, removed: {}}; }
+function confSave(c){ store.set(confKey(), c); }
+function confAdd(words, star){
+  if (!words.length) return;
+  const c = confLoad(), now = Date.now();
+  words.forEach(w => { const k = wkey(w); c.items[k] = Object.assign(c.items[k] || {added: now}, star ? {star: true} : {}); delete c.removed[k]; });
+  confSave(c);
+}
+function confRemove(w){ const c = confLoad(), k = wkey(w); delete c.items[k]; c.removed[k] = Date.now(); confSave(c); }
+const confHas = w => !!confLoad().items[wkey(w)];
+const confIn = words => { const c = confLoad(); return words.filter(w => c.items[wkey(w)]); };
+/* pull wrong answers saved on the server so the list follows the student to another device */
+async function confSync(){
+  if (!ACCOUNTS || !AUTH) return false;
+  try {
+    const r = await api('me', {token: AUTH.token});
+    const c = confLoad(); let added = 0;
+    r.wrong.forEach(x => {
+      const w = lookupWord(x.en, x.page); if (!w[1]) return;
+      const k = wkey(w), t = Date.parse(x.last) || 0;
+      if (!c.items[k] && t > (c.removed[k] || 0)) { c.items[k] = {added: t}; added++; }
+    });
+    confSave(c); return added > 0;
+  } catch(e){ onAuthErrorQuiet(e); return false; }
+}
+function onAuthErrorQuiet(e){ if (e && e.code === 'auth') setAuth(null); }
+
 /* ---------- set home ---------- */
+let SCOPE = 'all';   // 'all' | 'conf'
+const scopeWords = () => SCOPE === 'conf' ? confIn(SET.w) : SET.w;
 function viewHome(){
   const backTo = origin === 'link' ? '' : `<button class="link" id="up">← ${origin === 'maker' ? '단어장 편집' : origin === 'me' ? '내 기록' : '페이지 고르기'}</button>`;
+  const conf = confIn(SET.w), words = scopeWords();
+  const tile = (go, title, sub, min) => `<button class="mode" data-go="${go}" ${words.length < (min || 1) ? 'disabled' : ''}><b>${title}</b><span>${sub}</span></button>`;
   $app.innerHTML = `${header(backTo)}${userBar()}
   <div class="setcard"><div class="eyebrow">${SET.id === 'custom' ? '단어장' : esc(BOOK)}</div><h1>${esc(SET.t)}</h1><div class="meta">${SET.w.length}개 단어</div></div>
-  <div class="modes">
-    <button class="mode" data-go="list"><b>단어 목록</b><span>뜻 가리고 외우기</span></button>
-    <button class="mode" data-go="cards"><b>카드 넘기기</b><span>알아요 / 몰라요 체크</span></button>
-    <button class="mode" data-go="choice"><b>뜻 고르기</b><span>4지선다 퀴즈</span></button>
-    <button class="mode" data-go="spell"><b>철자 쓰기</b><span>뜻 보고 영어로 쓰기</span></button>
+  <div class="tabs" role="tablist" aria-label="연습할 단어">
+    <button role="tab" class="tab" data-scope="all" aria-selected="${SCOPE === 'all'}">전체 <span class="tc">${SET.w.length}</span></button>
+    <button role="tab" class="tab" data-scope="conf" aria-selected="${SCOPE === 'conf'}">헷갈리는 단어 <span class="tc" id="confn">${conf.length}</span></button>
   </div>
+  ${SCOPE === 'conf' && !words.length ? `<div class="panel empty">아직 헷갈리는 단어가 없어요. 퀴즈에서 틀린 단어와 카드에서 ☆을 누른 단어가 여기에 모여요.</div>` : ''}
+  <div class="modes">
+    ${tile('list', SCOPE === 'conf' ? '헷갈리는 단어 보기' : '단어 목록', SCOPE === 'conf' ? '외운 단어는 목록에서 빼요' : '뜻 가리고 외우기')}
+    ${tile('cards', '카드 넘기기', '눌러서 뒤집고, 옆으로 밀어 넘겨요')}
+    ${tile('choice', '뜻 고르기', '영어 단어를 보고 알맞은 뜻 고르기', 2)}
+    ${tile('pick', '단어 고르기', '우리말 뜻을 보고 영어 단어 고르기', 2)}
+    ${tile('spell', '철자 쓰기', '첫 글자를 보고 영어로 쓰기')}
+    ${tile('match', '매칭 게임', '단어와 뜻 짝을 빨리 맞혀요. 틀리면 +1초', 2)}
+  </div>
+  <p class="help">퀴즈에서 틀린 단어는 '헷갈리는 단어'에 자동으로 모여요.</p>
   ${origin === 'link' ? '<div class="foot"><button class="link" id="toPages">학습지 페이지 전체 보기</button></div>' : ''}`;
-  $app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => MODES[b.dataset.go].run(SET.w));
-  const up = document.getElementById('up'); if (up) up.onclick = () => origin === 'maker' ? viewMake(SET) : origin === 'me' ? viewMe() : viewPages();
+  $app.querySelectorAll('[data-scope]').forEach(b => b.onclick = () => { SCOPE = b.dataset.scope; viewHome(); });
+  $app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => MODES[b.dataset.go].run(scopeWords()));
+  const up = document.getElementById('up'); if (up) up.onclick = () => { SCOPE = 'all'; origin === 'maker' ? viewMake(SET) : origin === 'me' ? viewMe() : viewPages(); };
   bindUserBar();
   const tp = document.getElementById('toPages'); if (tp) tp.onclick = viewPages;
   scrollTo(0, 0);
+  if (ACCOUNTS && AUTH && !viewHome.synced) { viewHome.synced = true; confSync().then(ch => { if (ch && document.getElementById('confn')) viewHome(); }); }
 }
 const back = () => '<button class="link" id="back">← 연습 고르기</button>';
-function bindBack(){ document.getElementById('back').onclick = viewHome; }
+function bindBack(){ document.getElementById('back').onclick = () => { stopTimers(); viewHome(); }; }
 const prog = (i, n) => `<div class="bar"><i style="width:${n ? i / n * 100 : 0}%"></i></div><div class="count">${i} / ${n}</div>`;
+let timers = [];
+function stopTimers(){ timers.forEach(t => { clearTimeout(t); clearInterval(t); }); timers = []; document.onkeydown = null; }
 
 /* ---------- list ---------- */
-function viewList(){
-  let hide = false;
-  $app.innerHTML = `${header(back())}<h2>${esc(SET.t)} · 단어 목록</h2>
+function viewList(words){
+  let hide = false; const conf = SCOPE === 'conf';
+  $app.innerHTML = `${header(back())}<h2>${esc(SET.t)} · ${conf ? '헷갈리는 단어' : '단어 목록'}</h2>
   <div class="row"><button class="btn ghost" id="hk">뜻 가리기</button><button class="btn ghost" id="sh">순서 섞기</button><button class="btn ghost" id="od">원래 순서</button></div>
   <div class="panel"><ul class="wl" id="wl"></ul></div>
-  <p class="help">뜻을 가린 상태에서 단어를 누르면 뜻이 보여요.</p>`;
+  <p class="help">${conf ? '다 외운 단어는 "외웠어요"를 눌러 목록에서 빼세요. 다시 틀리면 또 들어와요.' : '뜻을 가린 상태에서 단어를 누르면 뜻이 보여요.'}</p>`;
   bindBack();
   const wl = document.getElementById('wl');
-  const draw = words => { wl.innerHTML = words.map(wordRow).join(''); };
-  draw(SET.w);
-  wl.onclick = e => { const li = e.target.closest('li'); if (li && hide) li.classList.toggle('peek'); };
+  let shown = words;
+  const draw = list => { shown = list; wl.innerHTML = list.map((w, i) => conf ? wordRow(w).replace('</li>', `<button class="link done" data-done="${i}">외웠어요</button></li>`) : wordRow(w)).join('') || '<li class="muted">목록이 비었어요.</li>'; };
+  draw(words);
+  wl.onclick = e => {
+    const d = e.target.closest('[data-done]');
+    if (d) { confRemove(shown[+d.dataset.done]); draw(shown.filter((_, i) => i !== +d.dataset.done)); toast('헷갈리는 단어에서 뺐어요'); return; }
+    const li = e.target.closest('li'); if (li && hide) li.classList.toggle('peek');
+  };
   document.getElementById('hk').onclick = e => { hide = !hide; wl.classList.toggle('hideko', hide); wl.querySelectorAll('.peek').forEach(l => l.classList.remove('peek')); e.target.textContent = hide ? '뜻 보이기' : '뜻 가리기'; };
-  document.getElementById('sh').onclick = () => draw(shuffle(SET.w));
-  document.getElementById('od').onclick = () => draw(SET.w);
+  document.getElementById('sh').onclick = () => draw(shuffle(shown));
+  document.getElementById('od').onclick = () => draw(words.filter(w => shown.includes(w)));
 }
 
-/* ---------- flashcards ---------- */
+/* ---------- flashcards: tap to flip, swipe or arrows to move, star to keep ---------- */
+const STAR = on => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .7-4.4 4.1 1.1 5.9L12 16.5l-5.3 2.9 1.1-5.9L3.4 9.4l6-.7z" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+const cardOpts = store.get('wordroom-card-opts', {shuffle: false, koFirst: false});
 function viewCards(words){
-  const deck = shuffle(words); let i = 0, flipped = false; const unknown = [];
+  stopTimers();
+  let order = cardOpts.shuffle ? shuffle(words) : words.slice(), i = 0, flipped = false, auto = false, logged = false;
+  $app.innerHTML = `${header(back())}
+  <div class="row" style="justify-content:space-between"><div class="count" id="cnum"></div><div class="count">${esc(SET.t)}</div></div>
+  <div class="bar"><i id="cbar"></i></div>
+  <div class="flip" id="flip" tabindex="0" role="button" aria-label="카드 뒤집기">
+    <div class="flip-in" id="flipin">
+      <div class="face front"><span class="no" id="no1"></span><div id="f1"></div><span class="hint">눌러서 뒤집기 · 옆으로 밀어 넘기기</span></div>
+      <div class="face back"><span class="no" id="no2"></span><div id="f2"></div></div>
+    </div>
+    <button class="star" id="star" aria-label="헷갈리는 단어로 표시"></button>
+  </div>
+  <div class="row center"><button class="btn ghost" id="prev">‹ 이전</button><button class="btn ghost" id="say">발음</button><button class="btn mark" id="next">다음 ›</button></div>
+  <div class="row center small">
+    <button class="toggle" id="t-shuf" aria-pressed="${cardOpts.shuffle}">섞기</button>
+    <button class="toggle" id="t-ko" aria-pressed="${cardOpts.koFirst}">뜻 먼저 보기</button>
+    <button class="toggle" id="t-auto" aria-pressed="false">자동 넘김</button>
+  </div>`;
+  bindBack();
+  const $ = id => document.getElementById(id);
+  const side = (w, ko) => ko ? `<div class="ko big-ko">${esc(w[1])}</div>${w[2] ? `<div class="note">${esc(w[2])}</div>` : ''}` : `<div class="big">${esc(w[0])}</div>`;
   const draw = () => {
-    if (i >= deck.length) return viewResult('cards', deck.length - unknown.length, deck.length, unknown);
-    const [en, ko, note] = deck[i];
-    $app.innerHTML = `${header(back())}${prog(i, deck.length)}
-    <button class="card" id="cd" aria-label="카드 뒤집기">
-      <div class="big">${esc(en)}</div>
-      ${flipped ? `<div class="ko">${esc(ko)}</div>${note ? `<div class="note">${esc(note)}</div>` : ''}` : '<div class="hint">눌러서 뜻 보기</div>'}
-    </button>
-    <div class="row" style="justify-content:center">${sayBtn(en)}</div>
-    <div class="row"><button class="btn ghost wide" id="no">몰라요</button><button class="btn mark wide" id="yes">알아요</button></div>`;
-    bindBack();
-    document.getElementById('cd').onclick = () => { flipped = !flipped; draw(); };
-    document.getElementById('no').onclick = () => { unknown.push(deck[i]); i++; flipped = false; draw(); };
-    document.getElementById('yes').onclick = () => { i++; flipped = false; draw(); };
+    const w = order[i];
+    $('cnum').textContent = `${i + 1} / ${order.length}`;
+    $('cbar').style.width = ((i + 1) / order.length * 100) + '%';
+    $('no1').textContent = $('no2').textContent = 'No. ' + (words.indexOf(w) + 1);
+    $('f1').innerHTML = side(w, cardOpts.koFirst);
+    $('f2').innerHTML = side(w, !cardOpts.koFirst);
+    $('flipin').classList.toggle('on', flipped);
+    const st = confHas(w); $('star').innerHTML = STAR(st); $('star').classList.toggle('on', st); $('star').setAttribute('aria-pressed', st);
+    $('prev').disabled = i === 0;
+    $('next').textContent = i === order.length - 1 ? '처음부터' : '다음 ›';
+    if (i === order.length - 1 && !logged && order.length > 1) { logged = true; if (ACCOUNTS && AUTH) sendLog({page: SET.id, pageTitle: SET.t, mode: '카드 넘기기', score: 0, total: 0, wrong: []}); }
+  };
+  const go = d => {
+    if (d > 0 && i === order.length - 1) { i = 0; if (cardOpts.shuffle) order = shuffle(words); }
+    else i = Math.max(0, Math.min(order.length - 1, i + d));
+    flipped = false; draw();
+  };
+  const flip = () => { flipped = !flipped; $('flipin').classList.toggle('on', flipped); };
+  const card = $('flip');
+  let sx = null, sy = 0, moved = false;
+  card.addEventListener('pointerdown', e => { if (e.target.closest('.star')) return; sx = e.clientX; sy = e.clientY; moved = false; });
+  card.addEventListener('pointerup', e => {
+    if (sx === null) return; const dx = e.clientX - sx, dy = e.clientY - sy; sx = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { moved = true; stopAuto(); go(dx < 0 ? 1 : -1); }
+  });
+  card.addEventListener('click', e => { if (e.target.closest('.star') || moved) return; stopAuto(); flip(); });
+  $('star').onclick = e => { e.stopPropagation(); const w = order[i]; if (confHas(w)) { confRemove(w); toast('헷갈리는 단어에서 뺐어요'); } else { confAdd([w], true); toast('헷갈리는 단어에 넣었어요'); } draw(); };
+  $('prev').onclick = () => { stopAuto(); go(-1); };
+  $('next').onclick = () => { stopAuto(); go(1); };
+  $('say').onclick = () => speak(order[i][0]);
+  $('t-shuf').onclick = e => { cardOpts.shuffle = !cardOpts.shuffle; store.set('wordroom-card-opts', cardOpts); e.target.setAttribute('aria-pressed', cardOpts.shuffle); const w = order[i]; order = cardOpts.shuffle ? shuffle(words) : words.slice(); i = order.indexOf(w); flipped = false; draw(); };
+  $('t-ko').onclick = e => { cardOpts.koFirst = !cardOpts.koFirst; store.set('wordroom-card-opts', cardOpts); e.target.setAttribute('aria-pressed', cardOpts.koFirst); flipped = false; draw(); };
+  /* auto: show the front, flip after 2.5s, move on 2.5s later */
+  let autoT = null;
+  const stopAuto = () => { if (!auto) return; auto = false; clearInterval(autoT); $('t-auto').setAttribute('aria-pressed', false); };
+  $('t-auto').onclick = () => {
+    if (auto) return stopAuto();
+    auto = true; $('t-auto').setAttribute('aria-pressed', true);
+    if (!cardOpts.koFirst) speak(order[i][0]);
+    autoT = setInterval(() => { if (!flipped) { flip(); if (cardOpts.koFirst) speak(order[i][0]); } else { if (i === order.length - 1) return stopAuto(); go(1); if (!cardOpts.koFirst) speak(order[i][0]); } }, 2500);
+    timers.push(autoT);
+  };
+  document.onkeydown = e => {
+    if (e.key === 'ArrowRight') { stopAuto(); go(1); } else if (e.key === 'ArrowLeft') { stopAuto(); go(-1); }
+    else if (e.key === ' ' || e.key === 'Enter') { if (document.activeElement === card || document.activeElement === document.body) { e.preventDefault(); stopAuto(); flip(); } }
   };
   draw();
+  scrollTo(0, 0);
 }
 
-/* ---------- multiple choice: distractors come from the same page ---------- */
-function viewChoice(words){
+/* ---------- multiple choice (both directions); distractors come from the same set and never share the answer's meaning ---------- */
+function viewQuiz(words, mode){
+  stopTimers();
+  const toKo = mode === 'choice';
   const deck = shuffle(words); let i = 0, right = 0; const wrong = [];
-  const pool = [...new Set(SET.w.map(p => p[1]))];
   const draw = () => {
-    if (i >= deck.length) return viewResult('choice', right, deck.length, wrong);
-    const [en, ko] = deck[i];
-    const opts = shuffle([ko, ...shuffle(pool.filter(m => m !== ko)).slice(0, 3)]);
+    if (i >= deck.length) return viewResult(mode, right, deck.length, wrong);
+    const w = deck[i];
+    const others = shuffle(SET.w.filter(x => x[1] !== w[1] && x[0] !== w[0]));
+    const seen = new Set([toKo ? w[1] : w[0]]), pick = [];
+    for (const x of others) { const t = toKo ? x[1] : x[0]; if (!seen.has(t)) { seen.add(t); pick.push(t); } if (pick.length === 3) break; }
+    const answer = toKo ? w[1] : w[0], opts = shuffle([answer, ...pick]);
     $app.innerHTML = `${header(back())}${prog(i, deck.length)}
-    <div class="card" style="min-height:170px"><div class="big">${esc(en)}</div>${sayBtn(en)}</div>
-    <div class="choices">${opts.map((o, k) => `<button class="choice" data-k="${k}">${esc(o)}</button>`).join('')}</div>
+    <div class="card" style="min-height:170px">${toKo ? `<div class="big">${esc(w[0])}</div>${sayBtn(w[0])}` : `<div class="ko big-ko">${esc(w[1])}</div><div class="hint">알맞은 영어 단어를 고르세요</div>`}</div>
+    <div class="choices">${opts.map((o, k) => `<button class="choice${toKo ? '' : ' en'}" data-k="${k}">${esc(o)}</button>`).join('')}</div>
     <div class="feedback" id="fb"></div>`;
     bindBack();
     $app.querySelectorAll('.choice').forEach(b => b.onclick = () => {
-      const ok = opts[+b.dataset.k] === ko;
-      $app.querySelectorAll('.choice').forEach(c => { c.disabled = true; if (opts[+c.dataset.k] === ko) c.classList.add('ok'); });
-      if (ok) right++; else { b.classList.add('no'); wrong.push(deck[i]); }
+      const ok = opts[+b.dataset.k] === answer;
+      $app.querySelectorAll('.choice').forEach(c => { c.disabled = true; if (opts[+c.dataset.k] === answer) c.classList.add('ok'); });
+      if (ok) right++; else { b.classList.add('no'); wrong.push(w); }
+      if (!toKo) speak(w[0]);
       const fb = document.getElementById('fb'); fb.className = 'feedback ' + (ok ? 'ok' : 'no'); fb.textContent = ok ? '정답!' : '아쉬워요. 초록색이 정답이에요.';
-      setTimeout(() => { i++; draw(); }, ok ? 700 : 1600);
+      timers.push(setTimeout(() => { i++; draw(); }, ok ? 700 : 1600));
     });
   };
   draw();
 }
 
-/* ---------- spelling ---------- */
+/* ---------- spelling: the first letter of every word is shown, since several words can share a meaning ---------- */
 function viewSpell(words){
+  stopTimers();
   const deck = shuffle(words); let i = 0, right = 0; const wrong = [];
   const draw = () => {
     if (i >= deck.length) return viewResult('spell', right, deck.length, wrong);
-    const [en, ko] = deck[i], key = plain(en); let hinted = 0, done = false;
-    const parts = key.split(' ').length;
-    const mask = n => key.split('').map((ch, k) => k < n || !/[A-Za-z]/.test(ch) ? ch : '_').join(' ').replace(/   /g, ' · ');
+    const [en, ko] = deck[i], key = plain(en); let extra = 0, done = false;
+    const firsts = new Set(); key.replace(/[A-Za-z]+/g, (m, off) => { firsts.add(off); return m; });
+    const mask = () => { let seen = 0; return key.split('').map((ch, k) => { if (!/[A-Za-z]/.test(ch)) return ch === ' ' ? ' ' : ch; seen++; return firsts.has(k) || seen <= extra + 1 ? ch : '_'; }).join(' '); };
     $app.innerHTML = `${header(back())}${prog(i, deck.length)}
-    <div class="card" style="min-height:150px"><div class="ko">${esc(ko)}</div><div class="hint" id="hn">${parts > 1 ? parts + '단어 표현' : key.length + '글자'}</div></div>
+    <div class="card" style="min-height:160px"><div class="ko big-ko">${esc(ko)}</div><div class="mask" id="hn" aria-label="힌트">${esc(mask())}</div></div>
     <form id="fm" class="row" style="flex-direction:column;align-items:stretch" autocomplete="off">
       <input class="answer" id="ans" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="영어로 쓰세요" aria-label="영어 답">
       <div class="feedback" id="fb"></div>
-      <div class="row"><button type="button" class="btn ghost" id="hint">힌트</button><button type="button" class="btn ghost" id="skip">모르겠어요</button><button type="submit" class="btn mark wide" id="sub">확인</button></div>
+      <div class="row"><button type="button" class="btn ghost" id="hint">한 글자 더</button><button type="button" class="btn ghost" id="skip">모르겠어요</button><button type="submit" class="btn mark wide" id="sub">확인</button></div>
     </form>`;
     bindBack();
     const ans = document.getElementById('ans'), fb = document.getElementById('fb'), sub = document.getElementById('sub');
-    setTimeout(() => ans.focus(), 50);
+    timers.push(setTimeout(() => ans.focus(), 50));
     const finish = ok => {
       done = true; ans.classList.add(ok ? 'ok' : 'no'); ans.readOnly = true;
       fb.className = 'feedback ' + (ok ? 'ok' : 'no');
@@ -605,7 +761,7 @@ function viewSpell(words){
       if (ok) right++; else wrong.push(deck[i]);
       speak(en); sub.textContent = '다음'; sub.focus();
     };
-    document.getElementById('hint').onclick = () => { if (done) return; hinted = Math.min(hinted + 1, key.length - 1); document.getElementById('hn').textContent = mask(hinted); };
+    document.getElementById('hint').onclick = () => { if (done) return; extra = Math.min(extra + 1, key.replace(/[^A-Za-z]/g, '').length - 1); document.getElementById('hn').textContent = mask(); ans.focus(); };
     document.getElementById('skip').onclick = () => { if (!done) finish(false); };
     document.getElementById('fm').onsubmit = e => {
       e.preventDefault();
@@ -617,33 +773,98 @@ function viewSpell(words){
   draw();
 }
 
+/* ---------- matching game: 8 pairs on a 4x4 board, a wrong pair adds a 1-second penalty ---------- */
+function viewMatch(words){
+  stopTimers();
+  const pool = [], seenEn = new Set(), seenKo = new Set();
+  for (const w of shuffle(words)) { if (seenEn.has(w[0]) || seenKo.has(w[1])) continue; seenEn.add(w[0]); seenKo.add(w[1]); pool.push(w); if (pool.length === 8) break; }
+  const tiles = shuffle(pool.flatMap((w, n) => [{n, t: w[0], en: true}, {n, t: w[1], en: false}]));
+  let sel = null, matched = 0, penalty = 0, misses = 0, start = 0, done = false; const missed = new Set();
+  const bestKey = 'wordroom-match-best-' + SET.id + '-' + pool.length;
+  $app.innerHTML = `${header(back())}
+  <div class="row" style="justify-content:space-between"><div class="count">${esc(SET.t)} · 매칭 게임</div><div class="timer" id="tm">0.0초</div></div>
+  <div class="match" id="mg" style="--cols:${pool.length > 4 ? 4 : 2}">
+    ${tiles.map((x, k) => `<button class="tile${x.en ? ' en' : ''}" data-k="${k}">${esc(x.t)}</button>`).join('')}
+  </div>
+  <div class="help" id="mh">단어와 뜻을 차례로 눌러 짝을 맞혀요. 틀리면 1초가 더해져요.</div>`;
+  bindBack();
+  const tm = document.getElementById('tm');
+  const elapsed = () => start ? (performance.now() - start) / 1000 + penalty : 0;
+  const tick = setInterval(() => { if (!done) tm.textContent = elapsed().toFixed(1) + '초'; }, 100); timers.push(tick);
+  document.getElementById('mg').onclick = e => {
+    const b = e.target.closest('.tile'); if (!b || done || b.classList.contains('gone')) return;
+    if (!start) start = performance.now();
+    const x = tiles[+b.dataset.k];
+    if (!sel) { sel = b; b.classList.add('sel'); if (x.en) speak(x.t); return; }
+    if (sel === b) { b.classList.remove('sel'); sel = null; return; }
+    const y = tiles[+sel.dataset.k];
+    if (x.en === y.en) { sel.classList.remove('sel'); sel = b; b.classList.add('sel'); if (x.en) speak(x.t); return; }
+    if (x.n === y.n) {
+      [sel, b].forEach(t => { t.classList.remove('sel'); t.classList.add('ok'); setTimeout(() => t.classList.add('gone'), 250); });
+      sel = null; matched++;
+      if (matched === pool.length) finishGame();
+    } else {
+      penalty += 1; misses++; missed.add((x.en ? x : y).n);
+      const a = sel; [a, b].forEach(t => { t.classList.remove('sel'); t.classList.add('no'); setTimeout(() => t.classList.remove('no'), 450); });
+      sel = null;
+      tm.classList.add('pen'); setTimeout(() => tm.classList.remove('pen'), 450);
+    }
+  };
+  function finishGame(){
+    done = true; const t = elapsed(); tm.textContent = t.toFixed(1) + '초';
+    const best = store.get(bestKey, null), isBest = best === null || t < best;
+    if (isBest) store.set(bestKey, t);
+    const miss = [...missed].map(n => pool[n]);
+    confAdd(miss);
+    if (ACCOUNTS && AUTH) sendLog({page: SET.id, pageTitle: SET.t, mode: '매칭 ' + t.toFixed(1) + '초', score: pool.length - miss.length, total: pool.length, wrong: miss.map(w => w[0])});
+    setTimeout(() => {
+      $app.innerHTML = `${header(back())}
+      <div class="panel" style="padding:24px;display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+        <div class="count">${esc(SET.t)} · 매칭 게임 · ${pool.length}쌍</div>
+        <div class="score">${t.toFixed(1)}<small>초</small></div>
+        <div class="help">${misses ? `틀린 짝 ${misses}번 (+${misses}초)` : '한 번도 안 틀렸어요!'} · ${isBest ? '최고 기록이에요' : `최고 기록 ${best.toFixed(1)}초`}</div>
+      </div>
+      ${miss.length ? `<div class="section-label">헷갈린 단어 ${miss.length}개</div><div class="panel"><ul class="wl">${miss.map(wordRow).join('')}</ul></div>` : ''}
+      <div class="row"><button class="btn mark wide" id="again">${words.length > 8 ? '새 단어로 한 판 더' : '한 판 더'}</button></div>`;
+      bindBack();
+      document.getElementById('again').onclick = () => viewMatch(words);
+      scrollTo(0, 0);
+    }, 450);
+  }
+  scrollTo(0, 0);
+}
+
 const MODES = {
-  list:   {name: '단어 목록', run: () => viewList()},
-  cards:  {name: '카드', run: viewCards, label: '알아요'},
-  choice: {name: '뜻 고르기', run: viewChoice},
-  spell:  {name: '철자 쓰기', run: viewSpell}
+  list:   {name: '단어 목록', run: viewList},
+  cards:  {name: '카드 넘기기', run: viewCards},
+  choice: {name: '뜻 고르기', run: w => viewQuiz(w, 'choice')},
+  pick:   {name: '단어 고르기', run: w => viewQuiz(w, 'pick')},
+  spell:  {name: '철자 쓰기', run: viewSpell},
+  match:  {name: '매칭 게임', run: viewMatch}
 };
 
 /* ---------- result ---------- */
 function viewResult(mode, right, total, miss){
+  stopTimers();
   const M = MODES[mode];
-  if (total === SET.w.length && SET.id !== 'custom' && SET.id !== 'mywrong') store.set(lastKey(SET.id), {m: M.name, s: right, n: total});
+  confAdd(miss);
+  if (SCOPE === 'all' && total === SET.w.length && SET.id !== 'custom' && SET.id !== 'mywrong') store.set(lastKey(SET.id), {m: M.name, s: right, n: total});
   const logged = ACCOUNTS && AUTH ? sendLog({page: SET.id, pageTitle: SET.t, mode: M.name, score: right, total, wrong: miss.map(w => w[0])}) : null;
   $app.innerHTML = `${header(back())}
   <div class="panel" style="padding:24px;display:flex;flex-direction:column;gap:6px;align-items:flex-start">
-    <div class="count">${esc(SET.t)} · ${esc(M.name)} · ${M.label || '맞힌 문제'}</div>
+    <div class="count">${esc(SET.t)} · ${esc(M.name)} · 맞힌 문제</div>
     <div class="score">${right}<small> / ${total}</small></div>
-    <div class="help">${miss.length ? '아래 단어를 한 번 더 봐요.' : '모두 맞혔어요. 다른 연습도 해 보세요.'}</div>
+    <div class="help">${miss.length ? "틀린 단어는 '헷갈리는 단어'에 모아 뒀어요." : '모두 맞혔어요. 다른 연습도 해 보세요.'}</div>
     ${logged ? '<div class="savestate" id="sv">기록 저장 중…</div>' : ''}
   </div>
-  ${miss.length ? `<div class="section-label">${mode === 'cards' ? '몰랐던 단어' : '틀린 단어'} ${miss.length}개</div><div class="panel"><ul class="wl">${miss.map(wordRow).join('')}</ul></div>` : ''}
+  ${miss.length ? `<div class="section-label">틀린 단어 ${miss.length}개</div><div class="panel"><ul class="wl">${miss.map(wordRow).join('')}</ul></div>` : ''}
   <div class="row">
-    ${miss.length ? `<button class="btn mark wide" id="redo">${mode === 'cards' ? '모르는 것만' : '틀린 것만'} 다시</button>` : ''}
+    ${miss.length ? '<button class="btn mark wide" id="redo">틀린 것만 다시</button>' : ''}
     <button class="btn ghost wide" id="again">전체 다시</button>
   </div>`;
   bindBack();
   if (miss.length) document.getElementById('redo').onclick = () => M.run(miss);
-  document.getElementById('again').onclick = () => M.run(SET.w);
+  document.getElementById('again').onclick = () => M.run(scopeWords());
   if (logged) logged.then(st => { const el = document.getElementById('sv'); if (!el) return;
     el.textContent = st === 'saved' ? '내 기록에 저장했어요' : st === 'auth' ? '로그인이 만료되어 저장하지 못했어요. 다시 로그인해 주세요.' : '인터넷이 연결되면 자동으로 저장돼요';
     el.className = 'savestate ' + (st === 'saved' ? 'ok' : 'wait'); });

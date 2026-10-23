@@ -64,7 +64,7 @@ window.WORD_PAGES = [
       ["reproductive", "생식의, 번식의", ""],
       ["function", "기능, 역할", ""],
       ["on one’s own", "혼자 힘으로, 스스로", "= independently"],
-      ["steal", "훔치다, 가로채다 steal – stole – stolen", ""],
+      ["steal", "훔치다, 가로채다", "steal – stole – stolen"],
       ["organism", "유기체, 생물", ""],
       ["multiply", "증식하다, 크게 증가하다", "= proliferate"],
       ["excessive", "지나친, 과도한", "adv) excessively"],
