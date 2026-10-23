@@ -208,6 +208,18 @@ tr.event td{color:var(--muted)}
 @media (max-width:380px){.tile{font-size:13px;min-height:76px}.tile.en{font-size:14px}}
 @media (prefers-reduced-motion:reduce){.flip-in{transition:none}.tile.no{animation:none}}
 
+/* related words */
+.wl .rels{grid-column:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);min-width:0}
+.rel b{font-size:11px;font-weight:700;color:var(--ink);background:var(--line);border-radius:5px;padding:1px 6px;margin-right:4px}
+.rel-en{font-family:var(--f-word);color:var(--ink);font-size:14px}
+.wl.hideko .rels{visibility:hidden}
+.wl.hideko li.peek .rels{visibility:visible}
+.face .rels{display:flex;flex-direction:column;gap:4px;font-size:13px;opacity:.85;align-items:center}
+.face.back .rel b{background:rgb(255 255 255 / .16);color:var(--navy-fg)}
+.face.back .rel-en{color:var(--navy-fg)}
+.tag{font-size:12px;font-weight:700;color:var(--muted);background:var(--line);border-radius:6px;padding:2px 8px}
+.face.back .tag{background:rgb(255 255 255 / .16);color:var(--navy-fg)}
+
 </style>
 </head>
 <body>
@@ -222,8 +234,19 @@ tr.event td{color:var(--muted)}
 const BASE_URL = "";  // 비워 두면 지금 접속한 주소를 그대로 씁니다
 const BOOK = window.WORD_BOOK || "영어 학습지 단어";
 const PAGES = window.WORD_PAGES || [];
-PAGES.forEach(p => p.w.forEach(w => { w.pid = p.id; }));   // remember each word's page
-const ALL = {id: 'all', t: '전체 페이지', w: PAGES.flatMap(p => p.w)};
+/* each page keeps its head words (shown in the word list) and practises them together with their
+   related words (synonyms, antonyms, derived forms from the 4th column of words.js) */
+function relWord(h, r, pid){
+  const w = [r[1], r[0] === '유의어' ? h[1] : (r[2] || ''), `${r[0]} · ${h[0]}`];
+  w.pid = pid; w.rel = r[0]; w.head = h; return w;
+}
+PAGES.forEach(p => {
+  p.heads = p.w;
+  p.heads.forEach(w => { w.pid = p.id; });
+  p.w = p.heads.flatMap(h => [h, ...(Array.isArray(h[3]) ? h[3] : []).map(r => relWord(h, r, p.id)).filter(w => w[1])]);
+});
+const ALL = {id: 'all', t: '전체 페이지', heads: PAGES.flatMap(p => p.heads), w: PAGES.flatMap(p => p.w)};
+const countLine = set => set.heads && set.w.length > set.heads.length ? `단어 ${set.heads.length}개 · 관련어 ${set.w.length - set.heads.length}개` : `${set.w.length}개 단어`;
 
 const $app = document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -236,7 +259,7 @@ const store = {
 };
 
 /* answer key: drop symbols and structure markers that are not typed ("~", "…", "+ 결과", "+O+O.C.") */
-const plain = en => en.replace(/\+.*$/, '').replace(/[~…]/g, ' ').replace(/[가-힣]/g, '').replace(/\s+/g, ' ').trim();
+const plain = en => en.replace(/\+.*$/, '').replace(/[~…()]/g, ' ').replace(/[가-힣]/g, '').replace(/\s+/g, ' ').trim();
 const norm = s => plain(s).toLowerCase().replace(/[’`]/g, "'").replace(/\s*-\s*/g, '-');
 const spoken = en => plain(en).replace(/\bto-v\b/g, 'to do').replace(/\bA\b/g, 'A');
 
@@ -266,7 +289,15 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-say]
 /* ---------- state ---------- */
 let SET = null, origin = 'pages';   // origin: 'pages' (from the page picker) | 'link' (teacher-made link) | 'maker'
 const header = right => `<div class="top"><div class="brand">${esc(BOOK)}</div>${right || ''}</div>`;
-const wordRow = ([en, ko, note]) => `<li><span class="en">${esc(en)}</span>${sayBtn(en)}<span class="ko">${esc(ko)}</span>${note ? `<span class="note">${esc(note)}</span>` : ''}</li>`;
+/* related words beside a head word: "유의어 only, exclusively" / "반의어 trivial 사소한" */
+function relHTML(w){
+  const rel = Array.isArray(w[3]) ? w[3] : []; if (!rel.length) return '';
+  const groups = [];
+  rel.forEach(r => { let g = groups.find(x => x.type === r[0]); if (!g) groups.push(g = {type: r[0], items: []}); g.items.push(r); });
+  return groups.map(g => `<span class="rel"><b>${esc(g.type)}</b> ${g.items.map(r => `<span class="rel-en">${esc(r[1])}</span>${r[2] && g.type !== '유의어' ? ' ' + esc(r[2]) : ''}`).join(', ')}</span>`).join('');
+}
+const wordRow = w => { const [en, ko, note] = w; const rel = relHTML(w);
+  return `<li><span class="en">${esc(en)}</span>${sayBtn(en)}<span class="ko">${esc(ko)}</span>${rel ? `<span class="rels">${rel}</span>` : note ? `<span class="note">${esc(note)}</span>` : ''}</li>`; };
 const lastKey = id => 'wordroom-last-' + (AUTH ? AUTH.sid + '-' : '') + id;
 
 /* ---------- accounts & records (Google Sheets via Apps Script, see apps-script/Code.gs) ---------- */
@@ -528,10 +559,10 @@ function viewPages(){
   SET = null; origin = 'pages'; SCOPE = 'all';
   const last = id => { const r = store.get(lastKey(id), null); return r ? `<span class="best">최근 ${esc(r.m)} ${r.s}/${r.n}</span>` : ''; };
   $app.innerHTML = `${header()}${userBar()}
-  <div class="setcard"><div class="eyebrow">단어 연습</div><h1>학습지 페이지를 골라요</h1><div class="meta">총 ${ALL.w.length}개 단어 · ${PAGES.length}개 구간</div></div>
+  <div class="setcard"><div class="eyebrow">단어 연습</div><h1>학습지 페이지를 골라요</h1><div class="meta">${countLine(ALL)} · ${PAGES.length}개 구간</div></div>
   <div class="pages">
-    ${PAGES.map(p => `<button class="page" data-id="${p.id}"><span class="pn">학습지</span><b>${esc(p.t.replace('학습지 ', ''))}</b><span class="pc">${p.w.length}개 단어</span>${last(p.id)}</button>`).join('')}
-    <button class="page all" data-id="all"><span class="pn">한꺼번에</span><b>전체 페이지</b><span class="pc">${ALL.w.length}개 단어를 섞어서</span>${last('all')}</button>
+    ${PAGES.map(p => `<button class="page" data-id="${p.id}"><span class="pn">학습지</span><b>${esc(p.t.replace('학습지 ', ''))}</b><span class="pc">${countLine(p)}</span>${last(p.id)}</button>`).join('')}
+    <button class="page all" data-id="all"><span class="pn">한꺼번에</span><b>전체 페이지</b><span class="pc">${ALL.w.length}개를 섞어서</span>${last('all')}</button>
   </div>
   <div class="foot"><button class="link" id="toMake">선생님: 학생용 QR 만들기 · 새 단어장</button></div>`;
   $app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => { SET = b.dataset.id === 'all' ? ALL : PAGES.find(p => p.id === b.dataset.id); viewHome(); });
@@ -578,7 +609,7 @@ function viewHome(){
   const conf = confIn(SET.w), words = scopeWords();
   const tile = (go, title, sub, min) => `<button class="mode" data-go="${go}" ${words.length < (min || 1) ? 'disabled' : ''}><b>${title}</b><span>${sub}</span></button>`;
   $app.innerHTML = `${header(backTo)}${userBar()}
-  <div class="setcard"><div class="eyebrow">${SET.id === 'custom' ? '단어장' : esc(BOOK)}</div><h1>${esc(SET.t)}</h1><div class="meta">${SET.w.length}개 단어</div></div>
+  <div class="setcard"><div class="eyebrow">${SET.id === 'custom' ? '단어장' : esc(BOOK)}</div><h1>${esc(SET.t)}</h1><div class="meta">${countLine(SET)}</div></div>
   <div class="tabs" role="tablist" aria-label="연습할 단어">
     <button role="tab" class="tab" data-scope="all" aria-selected="${SCOPE === 'all'}">전체 <span class="tc">${SET.w.length}</span></button>
     <button role="tab" class="tab" data-scope="conf" aria-selected="${SCOPE === 'conf'}">헷갈리는 단어 <span class="tc" id="confn">${conf.length}</span></button>
@@ -611,6 +642,7 @@ function stopTimers(){ timers.forEach(t => { clearTimeout(t); clearInterval(t); 
 /* ---------- list ---------- */
 function viewList(words){
   let hide = false; const conf = SCOPE === 'conf';
+  if (!conf && SET.heads) words = SET.heads;
   $app.innerHTML = `${header(back())}<h2>${esc(SET.t)} · ${conf ? '헷갈리는 단어' : '단어 목록'}</h2>
   <div class="row"><button class="btn ghost" id="hk">뜻 가리기</button><button class="btn ghost" id="sh">순서 섞기</button><button class="btn ghost" id="od">원래 순서</button></div>
   <div class="panel"><ul class="wl" id="wl"></ul></div>
@@ -654,7 +686,7 @@ function viewCards(words){
   </div>`;
   bindBack();
   const $ = id => document.getElementById(id);
-  const side = (w, ko) => ko ? `<div class="ko big-ko">${esc(w[1])}</div>${w[2] ? `<div class="note">${esc(w[2])}</div>` : ''}` : `<div class="big">${esc(w[0])}</div>`;
+  const side = (w, ko) => ko ? `<div class="ko big-ko">${esc(w[1])}</div>${relHTML(w) ? `<div class="rels">${relHTML(w)}</div>` : w[2] ? `<div class="note">${esc(w[2])}</div>` : ''}` : `<div class="big">${esc(w[0])}</div>${w.rel ? `<div class="tag">${esc(w.rel)}</div>` : ''}`;
   const draw = () => {
     const w = order[i];
     $('cnum').textContent = `${i + 1} / ${order.length}`;
@@ -719,7 +751,7 @@ function viewQuiz(words, mode){
     for (const x of others) { const t = toKo ? x[1] : x[0]; if (!seen.has(t)) { seen.add(t); pick.push(t); } if (pick.length === 3) break; }
     const answer = toKo ? w[1] : w[0], opts = shuffle([answer, ...pick]);
     $app.innerHTML = `${header(back())}${prog(i, deck.length)}
-    <div class="card" style="min-height:170px">${toKo ? `<div class="big">${esc(w[0])}</div>${sayBtn(w[0])}` : `<div class="ko big-ko">${esc(w[1])}</div><div class="hint">알맞은 영어 단어를 고르세요</div>`}</div>
+    <div class="card" style="min-height:170px">${toKo ? `<div class="big">${esc(w[0])}</div>${sayBtn(w[0])}` : `<div class="ko big-ko">${esc(w[1])}</div>${w.rel ? `<div class="tag">${esc(w[2])}</div>` : ''}<div class="hint">알맞은 영어 단어를 고르세요</div>`}</div>
     <div class="choices">${opts.map((o, k) => `<button class="choice${toKo ? '' : ' en'}" data-k="${k}">${esc(o)}</button>`).join('')}</div>
     <div class="feedback" id="fb"></div>`;
     bindBack();
@@ -745,7 +777,7 @@ function viewSpell(words){
     const firsts = new Set(); key.replace(/[A-Za-z]+/g, (m, off) => { firsts.add(off); return m; });
     const mask = () => { let seen = 0; return key.split('').map((ch, k) => { if (!/[A-Za-z]/.test(ch)) return ch === ' ' ? ' ' : ch; seen++; return firsts.has(k) || seen <= extra + 1 ? ch : '_'; }).join(' '); };
     $app.innerHTML = `${header(back())}${prog(i, deck.length)}
-    <div class="card" style="min-height:160px"><div class="ko big-ko">${esc(ko)}</div><div class="mask" id="hn" aria-label="힌트">${esc(mask())}</div></div>
+    <div class="card" style="min-height:160px"><div class="ko big-ko">${esc(ko)}</div>${deck[i].rel ? `<div class="tag">${esc(deck[i][2])}</div>` : ''}<div class="mask" id="hn" aria-label="힌트">${esc(mask())}</div></div>
     <form id="fm" class="row" style="flex-direction:column;align-items:stretch" autocomplete="off">
       <input class="answer" id="ans" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="영어로 쓰세요" aria-label="영어 답">
       <div class="feedback" id="fb"></div>
