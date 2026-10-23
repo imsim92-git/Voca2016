@@ -298,8 +298,8 @@ function viewLogin(next){
       <button role="tab" class="tab" aria-selected="${mode === 'register'}" data-m="register">처음 등록</button>
     </div>
     <form id="af" class="panel form" autocomplete="on" novalidate>
-      <div class="field"><label for="a-sid">학번</label><input id="a-sid" type="text" inputmode="numeric" autocomplete="username" placeholder="예: 20315" value="${esc(store.get('wordroom-last-sid', ''))}"></div>
-      ${mode === 'register' ? '<div class="field"><label for="a-name">이름</label><input id="a-name" type="text" autocomplete="name" placeholder="예: 김민지"></div>' : ''}
+      <div class="field"><label for="a-sid">학번</label><input id="a-sid" type="text" inputmode="numeric" autocomplete="username" placeholder="예: 21201" value="${esc(store.get('wordroom-last-sid', ''))}"></div>
+      ${mode === 'register' ? '<div class="field"><label for="a-name">이름</label><input id="a-name" type="text" autocomplete="name" placeholder="예: 홍길동"></div>' : ''}
       <div class="field"><label for="a-pw">비밀번호</label><input id="a-pw" type="password" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" placeholder="4자 이상"></div>
       ${mode === 'register' ? '<div class="field"><label for="a-pw2">비밀번호 확인</label><input id="a-pw2" type="password" autocomplete="new-password"></div><p class="help">비밀번호는 암호화해서 저장돼요. 잊어버리면 선생님께 초기화를 부탁하세요.</p>' : ''}
       <div class="feedback no" id="af-msg" role="alert">${esc(msg || '')}</div>
