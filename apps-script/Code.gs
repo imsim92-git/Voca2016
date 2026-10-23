@@ -92,7 +92,7 @@ function register_(req) {
       const salt = Utilities.getUuid(), now = new Date();
       sh.appendRow([asText_(sid), asText_(name), now, now, asText_(salt), asText_(hashPw_(pw, salt))]);
     }
-    appendLog_([new Date(), sid, name, '', '처음 등록', '', '', '', '', '']);
+    // 등록은 '기록' 탭에 남기지 않음 ('학생' 탭의 가입 시각으로 확인)
     return {ok: true, token: makeToken_('s', sid, TOKEN_DAYS * 24), student: {sid: sid, name: name}};
   });
 }
@@ -111,8 +111,7 @@ function login_(req) {
     fail_('학번이나 비밀번호가 맞지 않아요.');
   }
   cache.remove(key);
-  sh.getRange(row, 4).setValue(new Date());
-  appendLog_([new Date(), sid, name, '', '로그인', '', '', '', '', '']);
+  sh.getRange(row, 4).setValue(new Date());   // 로그인은 '학생' 탭의 최근 접속만 갱신
   return {ok: true, token: makeToken_('s', sid, TOKEN_DAYS * 24), student: {sid: sid, name: String(name)}};
 }
 
