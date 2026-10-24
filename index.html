@@ -220,6 +220,31 @@ tr.event td{color:var(--muted)}
 .tag{font-size:12px;font-weight:700;color:var(--muted);background:var(--line);border-radius:6px;padding:2px 8px}
 .face.back .tag{background:rgb(255 255 255 / .16);color:var(--navy-fg)}
 
+/* speech availability */
+.speechbar{display:flex;flex-direction:column;gap:8px;align-items:flex-start;background:var(--bad-bg);border:1px solid var(--bad);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--ink)}
+.speechbar .muted{font-size:13px}
+.btn.small{padding:8px 14px;font-size:13px;text-decoration:none}
+.say.off{opacity:.4}
+
+/* passages */
+.setlist{list-style:none;margin:0;padding:0}
+.setlist li{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--line)}
+.setlist li:first-child{border-top:0}
+.sl-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sl-act{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.small{font-size:12px}
+.iconbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700}
+.iconbtn:disabled{opacity:.35}
+.upload{display:flex;align-items:center;gap:10px;border:2px dashed var(--line);border-radius:12px;padding:16px;cursor:pointer;background:var(--surface);font-weight:400}
+.upload:hover{border-color:var(--ink)}
+.upload input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.upload{position:relative}
+.upload:focus-within{outline:3px solid var(--mark);outline-offset:2px}
+.up-icon{width:40px;height:40px;border-radius:10px;background:var(--paper);display:grid;place-items:center;flex:none}
+.up-icon svg{width:22px;height:22px}
+.badlines{background:var(--bad-bg);border-radius:10px;padding:10px 14px;font-size:13px}
+.badlines ul{margin:6px 0 0;padding-left:18px}
+
 </style>
 </head>
 <body>
@@ -232,7 +257,8 @@ tr.event td{color:var(--muted)}
 <script src="words.js"></script>
 <script>
 const BASE_URL = "";  // 비워 두면 지금 접속한 주소를 그대로 씁니다
-const BOOK = window.WORD_BOOK || "영어 학습지 단어";
+const BOOK = window.WORD_BOOK || "교과서";            // name of the built-in list (words.js) on the first screen
+const SITE_NAME = window.WORD_SITE || "우리반 단어장";  // the name at the top of every screen
 const PAGES = window.WORD_PAGES || [];
 /* each page keeps its head words (shown in the word list) and practises them together with their
    related words (synonyms, antonyms, derived forms from the 4th column of words.js) */
@@ -275,20 +301,55 @@ function decodeOldLink(text){
 }
 const base = () => (BASE_URL || location.href).split('#')[0];
 
-/* ---------- speech ---------- */
-const canSpeak = 'speechSynthesis' in window;
+/* ---------- speech ----------
+   Phones need care: in-app browsers (KakaoTalk, Naver on Android) have no speech at all, iPhone stays
+   silent until speech is started once from a tap, and cancelling right before speaking drops the new
+   utterance on some phones. */
+const synth = window.speechSynthesis;
+const canSpeak = !!(synth && window.SpeechSynthesisUtterance);
+let voices = [];
+function loadVoices(){ try { voices = synth.getVoices() || []; } catch(e){ voices = []; } }
+if (canSpeak) { loadVoices(); try { synth.addEventListener('voiceschanged', loadVoices); } catch(e){ synth.onvoiceschanged = loadVoices; } }
+const pickVoice = () => voices.find(v => /^en[-_]US/i.test(v.lang) && v.localService) || voices.find(v => /^en[-_]US/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang)) || null;
+let unlocked = false;
+function unlockSpeech(e){
+  if (unlocked || !canSpeak) return; unlocked = true;
+  // a first tap that already speaks unlocks by itself; a silent warm-up there would be cancelled and could swallow the word
+  if (e && e.target && e.target.closest && e.target.closest('[data-say], #say, .tile.en, .choice, #t-auto')) return;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); } catch(e){}
+}
+['touchend', 'click', 'keydown'].forEach(ev => document.addEventListener(ev, unlockSpeech, {capture: true, once: true}));
+const IN_APP = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp|; wv\)/i.test(navigator.userAgent);
+const IS_KAKAO = /KAKAOTALK/i.test(navigator.userAgent);
+let noSpeechShown = false;
+function noSpeechNotice(){
+  toast(IN_APP ? '앱 안의 브라우저에서는 발음이 안 나와요. 크롬이나 사파리로 열어 주세요.' : '이 브라우저는 발음 듣기를 지원하지 않아요. 크롬이나 사파리로 열어 주세요.');
+}
 function speak(text){
-  if (!canSpeak) return;
-  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(spoken(text)); u.lang = 'en-US'; u.rate = .9;
-    const v = speechSynthesis.getVoices().find(v => /^en[-_]US/i.test(v.lang)); if (v) u.voice = v; speechSynthesis.speak(u); } catch(e){}
+  if (!canSpeak) { if (!noSpeechShown) { noSpeechShown = true; noSpeechNotice(); } return; }
+  try {
+    if (synth.speaking || synth.pending) synth.cancel();
+    if (synth.paused) synth.resume();
+    const u = new SpeechSynthesisUtterance(spoken(text));
+    u.lang = 'en-US'; u.rate = .9;
+    const v = pickVoice(); if (v) u.voice = v;
+    synth.speak(u);
+  } catch(e){}
+}
+/* shown on the page picker and set home when this browser cannot speak */
+function speechBanner(){
+  if (canSpeak) return '';
+  const url = location.href;
+  return `<div class="speechbar"><span>${IN_APP ? '지금 앱 안의 브라우저로 열려 있어서 발음 듣기가 안 돼요.' : '이 브라우저에서는 발음 듣기가 안 돼요.'} 크롬이나 사파리로 열면 들을 수 있어요.</span>
+    ${IS_KAKAO ? `<a class="btn mark small" href="kakaotalk://web/openExternal?url=${encodeURIComponent(url)}">다른 브라우저로 열기</a>` : '<span class="muted">오른쪽 위 ⋮ 또는 공유 메뉴에서 "다른 브라우저로 열기"를 눌러요.</span>'}</div>`;
 }
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
-const sayBtn = w => canSpeak ? `<button class="say" data-say="${esc(w)}" aria-label="${esc(w)} 발음 듣기">${SPK}</button>` : '';
+const sayBtn = w => `<button class="say${canSpeak ? '' : ' off'}" data-say="${esc(w)}" aria-label="${esc(w)} 발음 듣기">${SPK}</button>`;
 document.addEventListener('click', e => { const b = e.target.closest('[data-say]'); if (b){ e.stopPropagation(); speak(b.dataset.say); } }, true);
 
 /* ---------- state ---------- */
 let SET = null, origin = 'pages';   // origin: 'pages' (from the page picker) | 'link' (teacher-made link) | 'maker'
-const header = right => `<div class="top"><div class="brand">${esc(BOOK)}</div>${right || ''}</div>`;
+const header = right => `<div class="top"><div class="brand">${esc(SITE_NAME)}</div>${right || ''}</div>`;
 /* related words beside a head word: "유의어 only, exclusively" / "반의어 trivial 사소한" */
 function relHTML(w){
   const rel = Array.isArray(w[3]) ? w[3] : []; if (!rel.length) return '';
@@ -410,21 +471,21 @@ function viewLogin(next){
 const fmtTime = s => { const d = new Date(s); return isNaN(d) ? '' : d.toLocaleString('ko-KR', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'}); };
 const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '–';
 function lookupWord(en, page){
-  const p = PAGES.find(p => p.id === page);
-  return (p && p.w.find(w => w[0] === en)) || ALL.w.find(w => w[0] === en) || [en, '', ''];
+  const p = PAGES.find(p => p.id === page) || SETS.find(s => s.id === page);
+  return (p && p.w.find(w => w[0] === en)) || ALL.w.find(w => w[0] === en) || SETS.flatMap(s => s.w).find(w => w[0] === en) || [en, '', ''];
 }
-const pageName = id => id === 'all' ? '전체' : id === 'mywrong' ? '내 오답' : id === 'custom' ? '단어장' : ((PAGES.find(p => p.id === id) || {}).t || id || '').replace('학습지 ', '');
+const pageName = id => id === 'all' ? '전체' : id === 'mywrong' ? '내 오답' : id === 'custom' ? '단어장' : ((PAGES.find(p => p.id === id) || SETS.find(s => s.id === id) || {}).t || id || '').replace('학습지 ', '');
 
 async function viewMe(){
   if (!AUTH) return viewLogin(viewMe);
-  $app.innerHTML = `${header('<button class="link" id="up">← 페이지 고르기</button>')}${userBar()}<h2>내 기록</h2><div class="panel empty">기록을 불러오는 중…</div>`;
-  document.getElementById('up').onclick = viewPages; bindUserBar();
+  $app.innerHTML = `${header('<button class="link" id="up">← 처음으로</button>')}${userBar()}<h2>내 기록</h2><div class="panel empty">기록을 불러오는 중…</div>`;
+  document.getElementById('up').onclick = () => route(); bindUserBar();
   await flushQueue();
   let r;
   try { r = await api('me', {token: AUTH.token}); }
   catch(e){ if (onAuthError(e, viewMe)) return; $app.querySelector('.empty').textContent = e.error || '기록을 불러오지 못했어요.'; return; }
   const wrong = r.wrong.map(w => ({w: lookupWord(w.en, w.page), count: w.count, page: w.page, last: w.last}));
-  $app.innerHTML = `${header('<button class="link" id="up">← 페이지 고르기</button>')}${userBar()}
+  $app.innerHTML = `${header('<button class="link" id="up">← 처음으로</button>')}${userBar()}
   <h2>내 기록</h2>
   <div class="stats">
     <div class="stat"><span>연습 횟수</span><b>${r.stats.sessions}</b></div>
@@ -438,7 +499,7 @@ async function viewMe(){
   <div class="section-label">최근 연습</div>
   ${r.recent.length ? `<div class="panel"><ul class="log">${r.recent.map(l => `<li><span>${esc(fmtTime(l.at))}</span><span>${esc(pageName(l.page) || l.pageTitle)} · ${esc(l.mode)}</span><b>${l.score}/${l.total}</b></li>`).join('')}</ul></div>`
     : '<div class="panel empty">아직 연습 기록이 없어요.</div>'}`;
-  document.getElementById('up').onclick = viewPages; bindUserBar();
+  document.getElementById('up').onclick = () => route(); bindUserBar();
   const d = document.getElementById('drill');
   if (d) d.onclick = () => { SET = {id: 'mywrong', t: '내가 자주 틀린 단어', w: wrong.slice(0, 20).map(x => x.w).filter(w => w[1])}; origin = 'me'; viewHome(); };
   scrollTo(0, 0);
@@ -446,27 +507,28 @@ async function viewMe(){
 
 /* ---------- teacher: practice records ---------- */
 function adminValid(){ return ADMIN && ADMIN.exp > Date.now(); }
-async function viewAdmin(){
+async function viewAdmin(next){
   if (!API) {
     $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}<div class="panel empty">학생 기록을 보려면 먼저 구글 시트 서버를 연결해야 해요. README의 안내대로 config.js에 apiUrl을 넣어 주세요.</div>`;
-    document.getElementById('up').onclick = viewPages; return;
+    document.getElementById('up').onclick = () => route(); return;
   }
+  if (typeof next !== 'function') next = null;
   if (!adminValid()) {
     $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}
-    <div class="setcard"><div class="eyebrow">선생님용</div><h1>학생 기록 보기</h1><div class="meta">관리자 비밀번호로 들어가요.</div></div>
+    <div class="setcard"><div class="eyebrow">선생님용</div><h1>선생님 메뉴</h1><div class="meta">학생 기록, 지문 관리, QR 만들기는 관리자 비밀번호로 들어가요.</div></div>
     <form id="adf" class="panel form"><div class="field"><label for="ad-pw">관리자 비밀번호</label><input id="ad-pw" type="password" autocomplete="current-password"></div>
     <div class="feedback no" id="ad-msg" role="alert"></div><button type="submit" class="btn mark" id="ad-go">들어가기</button></form>`;
-    document.getElementById('up').onclick = viewPages;
+    document.getElementById('up').onclick = () => route();
     document.getElementById('ad-pw').focus();
     document.getElementById('adf').onsubmit = async e => {
       e.preventDefault(); const go = document.getElementById('ad-go'); go.disabled = true;
-      try { const r = await api('adminLogin', {pw: document.getElementById('ad-pw').value}); ADMIN = {token: r.token, exp: Date.now() + 11 * 3600e3}; store.set('wordroom-admin', ADMIN); viewAdmin(); }
+      try { const r = await api('adminLogin', {pw: document.getElementById('ad-pw').value}); ADMIN = {token: r.token, exp: Date.now() + 11 * 3600e3}; store.set('wordroom-admin', ADMIN); (next || viewAdmin)(); }
       catch(err){ go.disabled = false; document.getElementById('ad-msg').textContent = err.error || '다시 시도해 주세요.'; }
     };
     return;
   }
-  $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}<h2>학생 기록</h2><div class="panel empty">기록을 불러오는 중…</div>`;
-  document.getElementById('up').onclick = viewPages;
+  $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}${adminNav('records')}<h2>학생 기록</h2><div class="panel empty">기록을 불러오는 중…</div>`;
+  document.getElementById('up').onclick = () => route(); bindAdminNav();
   let r;
   try { r = await api('admin', {token: ADMIN.token}); }
   catch(e){ if (e.code === 'auth') { ADMIN = null; store.set('wordroom-admin', null); return viewAdmin(); } $app.querySelector('.empty').textContent = e.error || '불러오지 못했어요.'; return; }
@@ -474,7 +536,7 @@ async function viewAdmin(){
   const practicedToday = new Set(r.recent.filter(l => l.total > 0 && new Date(l.at).toDateString() === today).map(l => l.sid)).size;
   const sessions = r.students.reduce((a, s) => a + s.sessions, 0);
   let tab = store.get('wordroom-admin-tab', 'students'), filter = '';
-  $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}
+  $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}${adminNav('records')}
   <div class="row" style="justify-content:space-between"><h2>학생 기록</h2>
     <span class="row" style="gap:14px"><a class="link" href="${esc(r.sheetUrl)}" target="_blank" rel="noopener">구글 시트 열기</a><button class="link" id="rf">새로고침</button><button class="link" id="ao">나가기</button></span></div>
   <div class="stats">
@@ -490,9 +552,9 @@ async function viewAdmin(){
   <input type="text" id="flt" placeholder="학번이나 이름으로 찾기" aria-label="학생 찾기">
   <div id="tb"></div>
   <div id="detail"></div>`;
-  document.getElementById('up').onclick = viewPages;
+  document.getElementById('up').onclick = () => route(); bindAdminNav();
   document.getElementById('rf').onclick = viewAdmin;
-  document.getElementById('ao').onclick = () => { ADMIN = null; store.set('wordroom-admin', null); viewPages(); };
+  document.getElementById('ao').onclick = () => { ADMIN = null; store.set('wordroom-admin', null); route(); };
   const tb = document.getElementById('tb'), flt = document.getElementById('flt');
   const match = (sid, name) => !filter || String(sid).includes(filter) || String(name).includes(filter);
   const draw = () => {
@@ -554,19 +616,305 @@ async function viewAdmin(){
   }
 }
 
+/* ---------- word text → words: shared by the teacher's editor and by sets saved on the server ---------- */
+/* "solely - 오로지, 단지 = only, exclusively" → ["solely", "오로지, 단지", "= only, exclusively"] */
+function normMarkers(m){
+  return String(m || '').replace(/\s*(=|↔)\s*/g, ' $1 ').replace(/(^|[\s,])(adv|[vna])\)\s*/g, '$1 $2) ').replace(/\s+/g, ' ').trim();
+}
+function splitMeaning(raw){
+  let m = normMarkers(raw), note = '';
+  const lead = m.match(/^= ([A-Za-z][A-Za-z ,'’-]*?) (?=[가-힣~(\[])/);
+  if (lead) { note = '= ' + lead[1]; m = m.slice(lead[0].length); }
+  m = m.replace(/^a\) /, '');
+  const k = m.search(/ (=|↔|adv\)|[vna]\)) /);
+  if (k >= 0) { note = (note + ' ' + m.slice(k + 1)).trim(); m = m.slice(0, k); }
+  return [m.replace(/^[\s,;]+|[\s,;]+$/g, ''), note];
+}
+const REL_TYPE = {'=': '유의어', '↔': '반의어', 'v)': '동사', 'a)': '형용사', 'n)': '명사', 'adv)': '부사'};
+/* note → related words, the same rules used to build words.js */
+function relFromNote(note){
+  const out = [];
+  if (!note) return out;
+  for (const part of normMarkers(note).split(/\s(?=(?:=|↔|adv\)|[vna]\))\s)/)) {
+    const m = part.match(/^(=|↔|adv\)|[vna]\))\s+(.*)$/); if (!m) continue;
+    const type = REL_TYPE[m[1]], rest = m[2].trim(); if (!rest) continue;
+    if (type === '유의어') (/\(/.test(rest) ? [rest] : rest.split(/\s*,\s*/)).filter(Boolean).forEach(en => out.push([type, en]));
+    else { const k = rest.search(/[가-힣~(\[]/); const en = (k > 0 ? rest.slice(0, k) : rest).trim(), ko = k > 0 ? rest.slice(k).trim() : ''; if (en && ko) out.push([type, en, ko]); }
+  }
+  return out;
+}
+/* one line per word: "영어 - 뜻", a tab, a colon, or just English then Korean */
+function parseWordLine(line){
+  line = line.trim().replace(/^\d+[.)]\s*/, '').replace(/^[-•·]\s*/, '');
+  if (!line) return null;
+  let en = '', rest = '';
+  const tab = line.split('\t');
+  if (tab.length >= 2) { en = tab[0]; rest = tab.slice(1).join(' '); }
+  else {
+    const k = line.search(/\s[-–—:|]\s|[:|]\s/);
+    if (k > 0) { en = line.slice(0, k); rest = line.slice(k).replace(/^\s*[-–—:|]\s*/, ''); }
+    else { const h = line.search(/[가-힣(~\[]/); if (h > 0) { en = line.slice(0, h); rest = line.slice(h); } }
+  }
+  en = en.replace(/[,\s]+$/, '').trim(); rest = rest.trim();
+  if (!en || !rest || !/[A-Za-z]/.test(en)) return null;
+  const [ko, note] = splitMeaning(rest);
+  return ko ? (note ? [en, ko, note] : [en, ko]) : null;
+}
+function parseWordText(text){
+  const words = [], bad = [];
+  String(text || '').split(/\r?\n/).forEach(l => { if (!l.trim()) return; const w = parseWordLine(l); if (w) words.push(w); else bad.push(l.trim()); });
+  return {words, bad};
+}
+const wordsToText = ws => ws.map(w => `${w[0]} - ${w[1]}${w[2] ? ' ' + w[2] : ''}`).join('\n');
+
+/* photo text (OCR) → "영어 - 뜻" lines. A worksheet table comes back cell by cell or row by row,
+   so read it as a stream: English words start an entry, Korean words are its meaning, and
+   =, ↔, v), a), n), adv) start the related-word part that belongs to the same entry. */
+function ocrToLines(text){
+  const isK = t => /[가-힣]/.test(t), isL = t => /[A-Za-z]/.test(t) && !isK(t);
+  const MARK = /^(=|↔|adv\)|[vna]\))$/;
+  const GLUE = /^(of|to|in|out|on|off|up|down|for|with|from|into|about|against|a|an|the|be|one’s|one's|~)$/i;
+  const entries = []; let cur = null, state = 'none', noteKind = '', skip = false;
+  const start = () => { cur = {en: [], ko: [], note: []}; entries.push(cur); state = 'en'; };
+  String(text || '').replace(/ /g, ' ').split(/\r?\n/).forEach(line => {
+    if (/^\s*(학습지|단원|과)?\s*\d+([\s~-]*\d+)?\s*(페이지|쪽|p\.?|번|단원|과)?\s*$/i.test(line) || /^\s*학습지/.test(line) || /^\s*(Lesson|Unit)\s*\d+/i.test(line)) { state = 'none'; return; }   // headings and page numbers
+    const toks = normMarkers(line).split(' ').filter(Boolean);
+    if (state === 'note') state = 'afternote';               // a line break ends a related-word part
+    toks.forEach((t, i) => {
+      const next = toks[i + 1] || '';
+      if (MARK.test(t) && cur && (state === 'ko' || state === 'note' || state === 'afternote')) { state = 'note'; noteKind = t; cur.note.push(t); return; }
+      if (state === 'note') {
+        if (noteKind === '=' && isK(t)) {
+          // "= only, exclusively suffering 고통": the words after the last comma were the next entry
+          // take the last word, and keep extending while a small joining word ties it to the one before
+          let j = cur.note.length - 1;
+          while (j > 2 && !/,$/.test(cur.note[j - 1]) && isL(cur.note[j - 1]) && (GLUE.test(cur.note[j]) || GLUE.test(cur.note[j - 1]))) j--;
+          if (j < 2) j = 2;                                    // the related part keeps at least one word
+          const moved = cur.note.splice(j); start(); cur.en.push(...moved); state = 'ko'; cur.ko.push(t); return;
+        }
+        if (noteKind !== '=' && isL(t) && cur.note.some(isK)) { start(); cur.en.push(t); return; }
+        // "n) presence spread 확산되다": a derived word with no meaning, then the next entry
+        const last = cur.note[cur.note.length - 1];
+        if (noteKind !== '=' && isL(t) && isL(last) && !MARK.test(last) && !GLUE.test(t) && !GLUE.test(last)) { start(); cur.en.push(t); return; }
+        cur.note.push(t); return;
+      }
+      const koGlue = state === 'ko' && isK(next) && /^([A-Z][A-Z.]{0,4}|~|…)$/.test(t);   // "O를 O.C. 한", "~ 대신에"
+      if (skip) { skip = false; return; }
+      if (t === '~' && isK(next) && !/^~/.test(next) && cur && state === 'en' && cur.en.length) { state = 'ko'; cur.ko.push(t); return; }
+      if (t === '+' && isK(next) && cur && state === 'en') { cur.en.push('+ ' + next); skip = true; return; }   // "result in + 결과"
+      if (isK(t) || koGlue) {
+        if (!cur || state === 'none') return;                // a heading such as "학습지 1페이지"
+        state = 'ko'; cur.ko.push(t); return;
+      }
+      if (isL(t) || /^[~…+(\-]/.test(t)) {
+        if (state === 'en') { cur.en.push(t); return; }
+        start(); cur.en.push(t); return;
+      }
+      if (cur && state === 'ko') cur.ko.push(t);
+      else if (cur && state === 'en') cur.en.push(t);
+    });
+  });
+  return entries.filter(e => e.en.length && e.ko.length)
+    .map(e => `${e.en.join(' ').replace(/\s*,$/, '')} - ${e.ko.join(' ')}${e.note.length ? ' ' + e.note.join(' ') : ''}`);
+}
+
+/* ---------- passages the teacher registers (교과서, 모의고사 1번 …), kept in the '지문' sheet ---------- */
+let SETS = (store.get('wordroom-sets', null) || []).map(toSet);   // last copy, so the first screen paints at once
+let setsLoaded = false;
+function toSet(s){
+  const heads = (s.words || []).map(w => { const h = [String(w[0]), String(w[1]), String(w[2] || '')]; const rel = relFromNote(h[2]); if (rel.length) h[3] = rel; h.pid = s.id; return h; });
+  return {id: s.id, t: s.name, kind: 'passage', heads, w: heads.flatMap(h => [h, ...(h[3] || []).map(r => relWord(h, r, s.id)).filter(x => x[1])])};
+}
+async function loadSets(){
+  if (!API) return false;
+  try {
+    const r = await api('sets', {});
+    const before = JSON.stringify(store.get('wordroom-sets', null));
+    store.set('wordroom-sets', r.sets); SETS = r.sets.map(toSet); setsLoaded = true;
+    return before !== JSON.stringify(r.sets);
+  } catch(e){ setsLoaded = true; return false; }
+}
+const hasBook = () => PAGES.length > 0;
+const hasRoot = () => ACCOUNTS && (SETS.length > 0 || !setsLoaded);
+
+/* ---------- student first screen: the passages to choose from ---------- */
+function viewRoot(){
+  SET = null; origin = 'root'; SCOPE = 'all';
+  if (ACCOUNTS && !SETS.length && setsLoaded) return viewPages();   // nothing registered yet: straight to the worksheet
+  const last = id => { const r = store.get(lastKey(id), null); return r ? `<span class="best">최근 ${esc(r.m)} ${r.s}/${r.n}</span>` : ''; };
+  $app.innerHTML = `${header()}${userBar()}${speechBanner()}
+  <div class="setcard"><div class="eyebrow">단어 연습</div><h1>지문을 골라요</h1><div class="meta">연습할 지문을 누르면 단어 연습 메뉴가 열려요.</div></div>
+  <div class="pages">
+    ${hasBook() ? `<button class="page all" data-root="book"><span class="pn">기본 목록</span><b>${esc(BOOK)}</b><span class="pc">${PAGES.length}개 구간 · ${countLine(ALL)}</span></button>` : ''}
+    ${SETS.map(s => `<button class="page" data-root="${esc(s.id)}"><span class="pn">지문</span><b>${esc(s.t)}</b><span class="pc">${countLine(s)}</span>${last(s.id)}</button>`).join('')}
+    ${!setsLoaded && !SETS.length ? '<div class="panel empty" style="grid-column:1/-1">지문 목록을 불러오는 중…</div>' : ''}
+  </div>`;
+  $app.querySelectorAll('[data-root]').forEach(b => b.onclick = () => {
+    if (b.dataset.root === 'book') return viewPages();
+    SET = SETS.find(s => s.id === b.dataset.root); origin = 'root'; viewHome();
+  });
+  bindUserBar();
+  scrollTo(0, 0);
+}
+
+/* ---------- teacher only: navigation between the admin screens ---------- */
+function adminNav(active){
+  const item = (k, label) => `<button class="tab" data-anav="${k}" aria-selected="${active === k}">${label}</button>`;
+  return `<div class="tabs" role="tablist" aria-label="선생님 메뉴">${item('records', '학생 기록')}${item('sets', '지문 관리')}${item('qr', 'QR·단어장 링크')}</div>`;
+}
+function bindAdminNav(){
+  $app.querySelectorAll('[data-anav]').forEach(b => b.onclick = () => ({records: viewAdmin, sets: viewSetsAdmin, qr: () => viewMake()})[b.dataset.anav]());
+}
+function needAdmin(next){
+  if (!API) { viewAdmin(); return true; }
+  if (!adminValid()) { viewAdmin(next); return true; }
+  return false;
+}
+function adminErr(e, retry){
+  if (e && e.code === 'auth') { ADMIN = null; store.set('wordroom-admin', null); viewAdmin(retry); return true; }
+  return false;
+}
+
+/* ---------- teacher only: the passage list ---------- */
+async function viewSetsAdmin(){
+  if (needAdmin(viewSetsAdmin)) return;
+  const draw = (msg) => {
+    $app.innerHTML = `${header('<button class="link" id="up">← 학생 화면</button>')}${adminNav('sets')}
+    <div class="row" style="justify-content:space-between"><h2>지문 관리</h2><button class="btn mark" id="new">+ 새 지문 만들기</button></div>
+    <p class="help">학생 첫 화면에 이 순서대로 나와요. 지문마다 단어표 사진을 올리면 같은 연습 메뉴가 만들어져요.</p>
+    ${msg ? `<div class="panel empty">${esc(msg)}</div>` : ''}
+    <div class="panel"><ul class="setlist" id="sl">
+      ${hasBook() ? `<li><div class="sl-main"><b>${esc(BOOK)}</b><span class="muted">학습지 ${PAGES.length}개 구간 · ${countLine(ALL)} · 사이트 파일(words.js)</span></div><span class="muted small">GitHub에서 고쳐요</span></li>` : ''}
+      ${SETS.map((s, i) => `<li data-sid="${esc(s.id)}"><div class="sl-main"><b>${esc(s.t)}</b><span class="muted">${countLine(s)}</span></div>
+        <div class="sl-act"><button class="iconbtn" data-up="${i}" ${i === 0 ? 'disabled' : ''} aria-label="위로">↑</button><button class="iconbtn" data-down="${i}" ${i === SETS.length - 1 ? 'disabled' : ''} aria-label="아래로">↓</button><button class="btn ghost small" data-edit="${i}">편집</button><button class="btn ghost small" data-del="${i}">삭제</button></div></li>`).join('')}
+      ${!SETS.length ? '<li class="muted">아직 등록한 지문이 없어요. "+ 새 지문 만들기"를 눌러 시작하세요.</li>' : ''}
+    </ul></div>`;
+    document.getElementById('up').onclick = () => route();
+    bindAdminNav();
+    document.getElementById('new').onclick = () => viewSetEdit(null);
+    $app.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => viewSetEdit(SETS[+b.dataset.edit]));
+    $app.querySelectorAll('[data-up],[data-down]').forEach(b => b.onclick = async () => {
+      const i = +(b.dataset.up ?? b.dataset.down), j = b.dataset.up !== undefined ? i - 1 : i + 1;
+      const ids = SETS.map(s => s.id); [ids[i], ids[j]] = [ids[j], ids[i]];
+      try { await api('adminSetOrder', {token: ADMIN.token, ids}); await loadSets(); draw(); }
+      catch(e){ if (!adminErr(e, viewSetsAdmin)) toast(e.error || '순서를 바꾸지 못했어요'); }
+    });
+    $app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      const s = SETS[+b.dataset.del], li = b.closest('li');
+      li.querySelector('.sl-act').innerHTML = `<span class="small">"${esc(s.t)}"을(를) 지울까요? 학생 기록은 남아요.</span><button class="btn ghost small" data-no>취소</button><button class="btn danger small" data-yes>삭제</button>`;
+      li.querySelector('[data-no]').onclick = () => draw();
+      li.querySelector('[data-yes]').onclick = async () => {
+        try { await api('adminSetDelete', {token: ADMIN.token, id: s.id}); await loadSets(); toast('지문을 지웠어요'); draw(); }
+        catch(e){ if (!adminErr(e, viewSetsAdmin)) toast(e.error || '지우지 못했어요'); }
+      };
+    });
+    scrollTo(0, 0);
+  };
+  draw(setsLoaded ? '' : '불러오는 중…');
+  await loadSets(); draw();
+}
+
+/* photo → smaller JPEG (long side 2000px) so it uploads quickly from a phone */
+function shrinkImage(file){
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', 0.88).split(',')[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('사진을 열 수 없어요. JPG나 PNG 사진으로 올려 주세요.')); };
+    img.src = url;
+  });
+}
+
+/* ---------- teacher only: make or edit one passage ---------- */
+function viewSetEdit(set){
+  if (needAdmin(() => viewSetEdit(set))) return;
+  const draftKey = 'wordroom-setdraft-' + (set ? set.id : 'new');
+  const draft = store.get(draftKey, null);
+  const startText = draft ? draft.text : set ? wordsToText(set.heads) : '';
+  $app.innerHTML = `${header('<button class="link" id="up">← 지문 목록</button>')}${adminNav('sets')}
+  <h2>${set ? '지문 편집' : '새 지문 만들기'}</h2>
+  <div class="field"><label for="se-name">지문 이름</label><input type="text" id="se-name" placeholder="예: 교과서 3과, 모의고사 1번" value="${esc(draft ? draft.name : set ? set.t : '')}" maxlength="40"></div>
+  <div class="field"><label for="se-file">단어표 사진</label>
+    <label class="upload" for="se-file"><input type="file" id="se-file" accept="image/*" multiple><span class="up-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="2"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg></span><span><b>단어표 사진 고르기</b><br><span class="muted">카메라로 찍거나 저장된 사진을 골라요 · 여러 장도 돼요</span></span></label>
+    <p class="help">사진 속 영어 단어와 뜻을 읽어서 아래 칸에 넣어요. 표가 반듯하고 글자가 선명할수록 정확해요.</p>
+    <div id="se-status" class="savestate"></div>
+  </div>
+  <div class="field"><label for="se-text">단어와 뜻 <span class="muted">· 한 줄에 하나씩 "영어 - 뜻"</span></label>
+    <textarea id="se-text" spellcheck="false" placeholder="solely - 오로지, 단지 = only, exclusively&#10;crucial - 중대한, 결정적인 ↔ trivial 사소한&#10;varied - 다양한 v) vary 다르다">${esc(startText)}</textarea>
+    <p class="help">사진에서 읽은 내용은 꼭 한 번 확인하고 고쳐 주세요. 뜻 뒤에 <b>= 유의어</b>, <b>↔ 반의어 뜻</b>, <b>v) 동사 뜻</b>처럼 적으면 관련어도 연습에 들어가요.</p>
+    <div class="parsed" id="se-count"></div>
+    <div id="se-bad"></div>
+  </div>
+  <div class="row"><button class="btn mark wide" id="se-save">저장하기</button><button class="btn ghost" id="se-try">미리 풀어보기</button></div>`;
+  const $ = id => document.getElementById(id);
+  const nameEl = $('se-name'), txt = $('se-text'), status = $('se-status');
+  const current = () => parseWordText(txt.value);
+  const upd = () => {
+    const r = current(), rel = r.words.reduce((n, w) => n + relFromNote(w[2]).length, 0);
+    $('se-count').innerHTML = r.words.length ? `단어 <b>${r.words.length}개</b>${rel ? ` · 관련어 <b>${rel}개</b>` : ''}` : '';
+    $('se-bad').innerHTML = r.bad.length ? `<div class="badlines"><b>단어로 읽지 못한 줄 ${r.bad.length}개</b> · "영어 - 뜻" 모양으로 고치거나 지워 주세요.<ul>${r.bad.slice(0, 8).map(l => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '';
+    store.set(draftKey, {name: nameEl.value, text: txt.value});
+  };
+  txt.addEventListener('input', upd); nameEl.addEventListener('input', upd); upd();
+  $('up').onclick = () => viewSetsAdmin();
+  bindAdminNav();
+  $('se-file').onchange = async e => {
+    const files = [...e.target.files]; e.target.value = '';
+    for (let k = 0; k < files.length; k++) {
+      status.className = 'savestate'; status.textContent = `사진 ${k + 1}/${files.length}에서 글자를 읽는 중… (10~30초)`;
+      try {
+        const data = await shrinkImage(files[k]);
+        const r = await api('adminOcr', {token: ADMIN.token, data, mime: 'image/jpeg'});
+        const lines = ocrToLines(r.text);
+        if (!lines.length) { status.className = 'savestate wait'; status.textContent = `사진 ${k + 1}에서 단어를 찾지 못했어요. 더 밝고 반듯하게 찍어 다시 올려 주세요.`; continue; }
+        txt.value = (txt.value.trim() ? txt.value.trim() + '\n' : '') + lines.join('\n');
+        upd();
+        status.className = 'savestate ok'; status.textContent = `사진 ${k + 1}에서 ${lines.length}줄을 읽었어요. 아래에서 확인해 주세요.`;
+      } catch(err){
+        if (adminErr(err, () => viewSetEdit(set))) return;
+        status.className = 'savestate wait'; status.textContent = err.error || err.message || '사진을 읽지 못했어요.';
+      }
+    }
+  };
+  $('se-try').onclick = () => {
+    const r = current(); if (!r.words.length) return toast('단어를 먼저 넣어 주세요');
+    SET = toSet({id: set ? set.id : 'preview', name: nameEl.value.trim() || '미리 보기', words: r.words}); origin = 'setedit'; SET.back = () => viewSetEdit(set); SCOPE = 'all'; viewHome();
+  };
+  $('se-save').onclick = async () => {
+    const name = nameEl.value.trim(), r = current();
+    if (!name) { toast('지문 이름을 써 주세요'); return nameEl.focus(); }
+    if (!r.words.length) return toast('단어를 먼저 넣어 주세요');
+    const go = $('se-save'); go.disabled = true; go.textContent = '저장하는 중…';
+    try {
+      await api('adminSetSave', {token: ADMIN.token, id: set ? set.id : '', name, words: r.words});
+      store.set(draftKey, null); await loadSets();
+      toast(r.bad.length ? `저장했어요. 읽지 못한 ${r.bad.length}줄은 빠졌어요` : '저장했어요');
+      viewSetsAdmin();
+    } catch(err){
+      go.disabled = false; go.textContent = '저장하기';
+      if (!adminErr(err, () => viewSetEdit(set))) toast(err.error || '저장하지 못했어요');
+    }
+  };
+  scrollTo(0, 0);
+}
+
 /* ---------- page picker ---------- */
 function viewPages(){
   SET = null; origin = 'pages'; SCOPE = 'all';
   const last = id => { const r = store.get(lastKey(id), null); return r ? `<span class="best">최근 ${esc(r.m)} ${r.s}/${r.n}</span>` : ''; };
-  $app.innerHTML = `${header()}${userBar()}
-  <div class="setcard"><div class="eyebrow">단어 연습</div><h1>학습지 페이지를 골라요</h1><div class="meta">${countLine(ALL)} · ${PAGES.length}개 구간</div></div>
+  $app.innerHTML = `${header(hasRoot() ? '<button class="link" id="toRoot">← 지문 고르기</button>' : '')}${userBar()}${speechBanner()}
+  <div class="setcard"><div class="eyebrow">${esc(BOOK)}</div><h1>학습지 페이지를 골라요</h1><div class="meta">${countLine(ALL)} · ${PAGES.length}개 구간</div></div>
   <div class="pages">
     ${PAGES.map(p => `<button class="page" data-id="${p.id}"><span class="pn">학습지</span><b>${esc(p.t.replace('학습지 ', ''))}</b><span class="pc">${countLine(p)}</span>${last(p.id)}</button>`).join('')}
     <button class="page all" data-id="all"><span class="pn">한꺼번에</span><b>전체 페이지</b><span class="pc">${ALL.w.length}개를 섞어서</span>${last('all')}</button>
-  </div>
-  <div class="foot"><button class="link" id="toMake">선생님: 학생용 QR 만들기 · 새 단어장</button></div>`;
+  </div>`;
   $app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => { SET = b.dataset.id === 'all' ? ALL : PAGES.find(p => p.id === b.dataset.id); viewHome(); });
-  document.getElementById('toMake').onclick = () => viewMake();
+  const tr = document.getElementById('toRoot'); if (tr) tr.onclick = viewRoot;
   bindUserBar();
   scrollTo(0, 0);
 }
@@ -605,11 +953,11 @@ function onAuthErrorQuiet(e){ if (e && e.code === 'auth') setAuth(null); }
 let SCOPE = 'all';   // 'all' | 'conf'
 const scopeWords = () => SCOPE === 'conf' ? confIn(SET.w) : SET.w;
 function viewHome(){
-  const backTo = origin === 'link' ? '' : `<button class="link" id="up">← ${origin === 'maker' ? '단어장 편집' : origin === 'me' ? '내 기록' : '페이지 고르기'}</button>`;
+  const backTo = origin === 'link' ? '' : `<button class="link" id="up">← ${origin === 'maker' ? '단어장 편집' : origin === 'me' ? '내 기록' : origin === 'root' ? '지문 고르기' : origin === 'setedit' ? '지문 편집' : '페이지 고르기'}</button>`;
   const conf = confIn(SET.w), words = scopeWords();
   const tile = (go, title, sub, min) => `<button class="mode" data-go="${go}" ${words.length < (min || 1) ? 'disabled' : ''}><b>${title}</b><span>${sub}</span></button>`;
-  $app.innerHTML = `${header(backTo)}${userBar()}
-  <div class="setcard"><div class="eyebrow">${SET.id === 'custom' ? '단어장' : esc(BOOK)}</div><h1>${esc(SET.t)}</h1><div class="meta">${countLine(SET)}</div></div>
+  $app.innerHTML = `${header(backTo)}${userBar()}${speechBanner()}
+  <div class="setcard"><div class="eyebrow">${SET.kind === 'passage' ? '지문' : SET.id === 'custom' ? '단어장' : esc(BOOK)}</div><h1>${esc(SET.t)}</h1><div class="meta">${countLine(SET)}</div></div>
   <div class="tabs" role="tablist" aria-label="연습할 단어">
     <button role="tab" class="tab" data-scope="all" aria-selected="${SCOPE === 'all'}">전체 <span class="tc">${SET.w.length}</span></button>
     <button role="tab" class="tab" data-scope="conf" aria-selected="${SCOPE === 'conf'}">헷갈리는 단어 <span class="tc" id="confn">${conf.length}</span></button>
@@ -627,7 +975,7 @@ function viewHome(){
   ${origin === 'link' ? '<div class="foot"><button class="link" id="toPages">학습지 페이지 전체 보기</button></div>' : ''}`;
   $app.querySelectorAll('[data-scope]').forEach(b => b.onclick = () => { SCOPE = b.dataset.scope; viewHome(); });
   $app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => MODES[b.dataset.go].run(scopeWords()));
-  const up = document.getElementById('up'); if (up) up.onclick = () => { SCOPE = 'all'; origin === 'maker' ? viewMake(SET) : origin === 'me' ? viewMe() : viewPages(); };
+  const up = document.getElementById('up'); if (up) up.onclick = () => { SCOPE = 'all'; origin === 'maker' ? viewMake(SET) : origin === 'me' ? viewMe() : origin === 'root' ? viewRoot() : origin === 'setedit' && SET.back ? SET.back() : viewPages(); };
   bindUserBar();
   const tp = document.getElementById('toPages'); if (tp) tp.onclick = viewPages;
   scrollTo(0, 0);
@@ -957,17 +1305,18 @@ function parseLines(text){
 const toText = set => set.w.map(p => p[0] + ' - ' + p[1] + (p[2] ? '\t' + p[2] : '')).join('\n');
 
 function viewMake(start){
+  if (needAdmin(() => viewMake(start))) return;
   const draft = store.get('wordroom-draft', null);
   const src = start && start.id === 'custom' ? start : draft;
-  const pageItems = [{id: 'site', title: BOOK, url: base()}, ...PAGES.map(p => ({id: p.id, title: p.t, url: base() + '#' + p.id})), {id: 'all', title: BOOK + ' 전체', url: base() + '#all'}];
+  const pageItems = [{id: 'site', title: '첫 화면 (지문 고르기)', url: base()}, ...SETS.map(s => ({id: s.id, title: s.t, url: base() + '#' + s.id})), ...PAGES.map(p => ({id: p.id, title: p.t, url: base() + '#' + p.id})), ...(PAGES.length ? [{id: 'all', title: BOOK + ' 전체', url: base() + '#all'}] : [])];
   pageItems.forEach(it => it.q = makeQR(it.url));
   const items = Object.fromEntries(pageItems.map(it => [it.id, it]));
   $app.innerHTML = `${header('<button class="link" id="toPages">← 학생 화면</button>')}
-  <button class="btn" id="toAdmin">학생 연습 기록 보기</button>
-  <div class="setcard"><div class="eyebrow">선생님용</div><h1>학생 접속 QR</h1><div class="meta">첫 화면 QR로 들어오면 학생이 페이지를 고르고, 페이지 QR로 들어오면 그 페이지 연습이 바로 열려요.</div></div>
+  ${adminNav('qr')}
+  <div class="setcard"><div class="eyebrow">선생님용</div><h1>학생 접속 QR</h1><div class="meta">첫 화면 QR로 들어오면 학생이 지문을 고르고, 지문·페이지 QR로 들어오면 그 연습이 바로 열려요.</div></div>
   <div class="field"><label for="qrsel">QR 고르기</label>
     <select id="qrsel" style="font:inherit;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink)">
-      ${pageItems.map(it => `<option value="${it.id}">${esc(it.id === 'site' ? '첫 화면 (페이지 고르기)' : it.title)}</option>`).join('')}
+      ${pageItems.map(it => `<option value="${it.id}">${esc(it.title)}</option>`).join('')}
     </select></div>
   <div class="panel qrbox" id="qrout"></div>
   <p class="help">QR 이미지는 학습지나 수업 슬라이드에 붙여 쓰세요. 링크를 바꾸려면 words.js만 고쳐서 다시 올리면 됩니다.</p>
@@ -981,8 +1330,8 @@ function viewMake(start){
   </div>
   <div class="row"><button class="btn mark wide" id="make">링크·QR 만들기</button><button class="btn ghost" id="try">미리 풀어보기</button></div>
   <div class="panel qrbox" id="out" hidden></div>`;
-  document.getElementById('toPages').onclick = viewPages;
-  document.getElementById('toAdmin').onclick = viewAdmin;
+  document.getElementById('toPages').onclick = () => route();
+  bindAdminNav();
   const sel = document.getElementById('qrsel'), qrout = document.getElementById('qrout');
   const showSel = () => { const it = items[sel.value]; qrout.innerHTML = qrCard(it.title, it.url, it.q, it.id); wireQR(qrout, items); };
   sel.onchange = showSel; showSel();
@@ -1008,8 +1357,10 @@ function viewMake(start){
 }
 
 /* ---------- boot: #p1, #p3-4 … opens a page, #all the whole book, #w… a teacher-made set ---------- */
+let setsPromise = null;
 function boot(){
   const h = decodeURIComponent((location.hash || '').slice(1));
+  if (API && !setsPromise) setsPromise = loadSets().then(changed => { if (changed && origin === 'root' && !SET) viewRoot(); return changed; });
   if (h === 'admin') return viewAdmin();
   if (LOGIN && !AUTH) return viewLogin(route);
   flushQueue();
@@ -1022,6 +1373,10 @@ function route(){
   if (p) { SET = p; origin = 'pages'; return viewHome(); }
   const s = h[0] === 'w' ? decodeToken(h) : null;
   if (s) { SET = s; origin = 'link'; return viewHome(); }
+  const ps = SETS.find(x => x.id === h);
+  if (ps) { SET = ps; origin = 'root'; return viewHome(); }
+  if (/^s[0-9a-f]{7}$/.test(h) && !setsLoaded && setsPromise) { $app.innerHTML = `${header()}<div class="panel empty">지문을 불러오는 중…</div>`; return setsPromise.then(route); }
+  if (hasRoot()) return viewRoot();
   viewPages();
 }
 boot();
