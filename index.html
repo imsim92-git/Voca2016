@@ -735,12 +735,12 @@ async function loadSets(){
   } catch(e){ setsLoaded = true; return false; }
 }
 const hasBook = () => PAGES.length > 0;
-const hasRoot = () => ACCOUNTS && (SETS.length > 0 || !setsLoaded);
+const hasRoot = () => ACCOUNTS && (SETS.length > 0 || !setsLoaded);   // no passages registered: the first screen is the 교과서 pages
 
 /* ---------- student first screen: the passages to choose from ---------- */
 function viewRoot(){
   SET = null; origin = 'root'; SCOPE = 'all';
-  if (ACCOUNTS && !SETS.length && setsLoaded) return viewPages();   // nothing registered yet: straight to the worksheet
+  if (ACCOUNTS && !SETS.length && setsLoaded && hasBook()) return viewPages();   // nothing registered yet: straight to 교과서
   const last = id => { const r = store.get(lastKey(id), null); return r ? `<span class="best">최근 ${esc(r.m)} ${r.s}/${r.n}</span>` : ''; };
   $app.innerHTML = `${header()}${userBar()}${speechBanner()}
   <div class="setcard"><div class="eyebrow">단어 연습</div><h1>지문을 골라요</h1><div class="meta">연습할 지문을 누르면 단어 연습 메뉴가 열려요.</div></div>
@@ -748,6 +748,7 @@ function viewRoot(){
     ${hasBook() ? `<button class="page all" data-root="book"><span class="pn">기본 목록</span><b>${esc(BOOK)}</b><span class="pc">${PAGES.length}개 구간 · ${countLine(ALL)}</span></button>` : ''}
     ${SETS.map(s => `<button class="page" data-root="${esc(s.id)}"><span class="pn">지문</span><b>${esc(s.t)}</b><span class="pc">${countLine(s)}</span>${last(s.id)}</button>`).join('')}
     ${!setsLoaded && !SETS.length ? '<div class="panel empty" style="grid-column:1/-1">지문 목록을 불러오는 중…</div>' : ''}
+    ${!hasBook() && setsLoaded && !SETS.length ? '<div class="panel empty" style="grid-column:1/-1">아직 연습할 지문이 없어요.</div>' : ''}
   </div>`;
   $app.querySelectorAll('[data-root]').forEach(b => b.onclick = () => {
     if (b.dataset.root === 'book') return viewPages();
@@ -1360,7 +1361,7 @@ function viewMake(start){
 let setsPromise = null;
 function boot(){
   const h = decodeURIComponent((location.hash || '').slice(1));
-  if (API && !setsPromise) setsPromise = loadSets().then(changed => { if (changed && origin === 'root' && !SET) viewRoot(); return changed; });
+  if (API && !setsPromise) setsPromise = loadSets().then(changed => { if (origin === 'root' && !SET) viewRoot(); return changed; });
   if (h === 'admin') return viewAdmin();
   if (LOGIN && !AUTH) return viewLogin(route);
   flushQueue();
