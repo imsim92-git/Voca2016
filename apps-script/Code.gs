@@ -4,6 +4,9 @@
  * 이 코드는 선생님의 구글 스프레드시트에 붙어서 동작합니다.
  *  - '학생' 시트: 학번, 이름, 가입·최근 접속 시각 (비밀번호는 원문이 아니라 해시로만 저장)
  *  - '기록' 시트: 누가, 언제, 어느 학습지를, 어떤 연습으로, 몇 점 받았는지, 틀린 단어
+ *  - '지문' 시트: 선생님이 등록한 지문 목록(교과서, 모의고사 1번 …)과 그 단어
+ *
+ * 단어표 사진 인식을 쓰려면: 편집기 왼쪽 '서비스' 옆 + → Drive API → 추가 (안내서 참고)
  *
  * 처음 한 번: 아래 ADMIN_PASSWORD_INIT에 관리자 비밀번호를 적고 setup 함수를 실행하세요.
  * 실행이 끝나면 비밀번호는 안전하게 저장되므로, 여기 적은 글자는 지워도 됩니다.
@@ -14,6 +17,8 @@ const SHEET_STUDENTS = '학생';
 const SHEET_LOG = '기록';
 const STUDENT_HEADERS = ['학번', '이름', '가입 시각', '최근 접속', 'salt', '비밀번호 해시'];
 const LOG_HEADERS = ['시각', '학번', '이름', '학습지', '연습', '점수', '문항 수', '정답률', '틀린 단어', '페이지 ID'];
+const SHEET_SETS = '지문';
+const SET_HEADERS = ['ID', '이름', '순서', '단어 수', '단어(JSON)', '만든 시각', '고친 시각'];
 const TOKEN_DAYS = 180;          // 학생 로그인 유지 기간
 const ADMIN_TOKEN_HOURS = 12;    // 관리자 로그인 유지 시간
 const MAX_FAILS = 8;             // 비밀번호를 이만큼 틀리면
@@ -25,6 +30,7 @@ function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureSheet_(ss, SHEET_STUDENTS, STUDENT_HEADERS);
   ensureSheet_(ss, SHEET_LOG, LOG_HEADERS);
+  ensureSheet_(ss, SHEET_SETS, SET_HEADERS);
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('SECRET')) props.setProperty('SECRET', Utilities.getUuid() + Utilities.getUuid());
   if (ADMIN_PASSWORD_INIT) {
@@ -73,7 +79,12 @@ const ACTIONS = {
   adminLogin: adminLogin_,
   admin: admin_,
   adminStudent: adminStudent_,
-  adminReset: adminReset_
+  adminReset: adminReset_,
+  sets: sets_,
+  adminSetSave: adminSetSave_,
+  adminSetDelete: adminSetDelete_,
+  adminSetOrder: adminSetOrder_,
+  adminOcr: adminOcr_
 };
 
 /* ---------------- 학생 ---------------- */
@@ -213,10 +224,98 @@ function statsFor_(sid) {
 }
 function isPractice_(l) { return l.total > 0; }
 
+
+/* ---------------- 지문 목록 (학생은 읽기만, 선생님만 등록·수정) ---------------- */
+function readSets_() {
+  const sh = sheet_(SHEET_SETS), n = sh.getLastRow(); if (n < 2) return [];
+  return sh.getRange(2, 1, n - 1, SET_HEADERS.length).getValues().map((r, i) => {
+    let words = []; try { words = JSON.parse(String(r[4] || '[]')); } catch (e) {}
+    return {row: i + 2, id: String(r[0]).trim(), name: String(r[1]), order: Number(r[2]) || 0, words: words, updated: iso_(r[6])};
+  }).filter(x => x.id).sort((a, b) => a.order - b.order || a.row - b.row);
+}
+function sets_() {
+  return {ok: true, sets: readSets_().map(x => ({id: x.id, name: x.name, words: x.words, updated: x.updated}))};
+}
+function cleanWords_(list) {
+  if (!Array.isArray(list)) fail_('단어 목록 형식이 올바르지 않아요.');
+  const out = [];
+  list.forEach(w => {
+    if (!Array.isArray(w)) return;
+    const en = String(w[0] || '').trim().slice(0, 80), ko = String(w[1] || '').trim().slice(0, 120), note = String(w[2] || '').trim().slice(0, 160);
+    if (en && ko) out.push(note ? [en, ko, note] : [en, ko]);
+  });
+  if (out.length > 600) fail_('한 지문에 단어는 600개까지 넣을 수 있어요.');
+  return out;
+}
+function adminSetSave_(req) {
+  checkToken_(req.token, 'a');
+  const name = String(req.name || '').trim().replace(/\s+/g, ' ');
+  if (!name || name.length > 40) fail_('지문 이름을 1~40자로 써 주세요.');
+  const words = cleanWords_(req.words || []);
+  const json = JSON.stringify(words);
+  if (json.length > 45000) fail_('단어가 너무 많아요. 지문을 둘로 나눠 주세요.');
+  return withLock_(() => {
+    const sh = sheet_(SHEET_SETS), now = new Date(), list = readSets_();
+    const cur = req.id ? list.find(x => x.id === String(req.id)) : null;
+    if (req.id && !cur) fail_('그 지문을 찾을 수 없어요. 새로고침해 주세요.');
+    if (cur) {
+      sh.getRange(cur.row, 2, 1, 4).setValues([[asText_(name), cur.order, words.length, json]]);
+      sh.getRange(cur.row, 7).setValue(now);
+      return {ok: true, id: cur.id};
+    }
+    const id = 's' + Utilities.getUuid().replace(/-/g, '').slice(0, 7);
+    const order = list.reduce((m, x) => Math.max(m, x.order), 0) + 1;
+    sh.appendRow([id, asText_(name), order, words.length, json, now, now]);
+    return {ok: true, id: id};
+  });
+}
+function adminSetDelete_(req) {
+  checkToken_(req.token, 'a');
+  return withLock_(() => {
+    const cur = readSets_().find(x => x.id === String(req.id || ''));
+    if (!cur) fail_('그 지문을 찾을 수 없어요.');
+    sheet_(SHEET_SETS).deleteRow(cur.row);
+    return {ok: true};
+  });
+}
+function adminSetOrder_(req) {
+  checkToken_(req.token, 'a');
+  const ids = (Array.isArray(req.ids) ? req.ids : []).map(String);
+  return withLock_(() => {
+    const sh = sheet_(SHEET_SETS);
+    readSets_().forEach(x => { const k = ids.indexOf(x.id); sh.getRange(x.row, 3).setValue(k < 0 ? ids.length + x.order : k + 1); });
+    return {ok: true};
+  });
+}
+
+/* 단어표 사진 → 글자: 선생님 구글 드라이브의 무료 글자 인식(OCR)을 쓰고, 임시 문서는 바로 휴지통으로 */
+function adminOcr_(req) {
+  checkToken_(req.token, 'a');
+  const b64 = String(req.data || '');
+  if (!b64) fail_('사진이 없어요.');
+  if (b64.length > 14000000) fail_('사진이 너무 커요. 10MB보다 작은 사진으로 올려 주세요.');
+  if (typeof Drive === 'undefined') fail_("사진 인식을 쓰려면 Apps Script 편집기 왼쪽 '서비스' 옆 + → Drive API → 추가를 한 뒤, 새 버전으로 다시 배포해 주세요.", 'no_drive');
+  const mime = /^image\/(png|jpeg|gif|bmp|webp)$/.test(String(req.mime)) ? String(req.mime) : 'image/jpeg';
+  const blob = Utilities.newBlob(Utilities.base64Decode(b64), mime, 'word-photo');
+  let id = '';
+  try {
+    const meta = {mimeType: MimeType.GOOGLE_DOCS};
+    if (Drive.Files.create) { meta.name = '단어장 사진 인식 (임시)'; id = Drive.Files.create(meta, blob, {ocrLanguage: 'ko'}).id; }
+    else { meta.title = '단어장 사진 인식 (임시)'; id = Drive.Files.insert(meta, blob, {ocr: true, ocrLanguage: 'ko'}).id; }
+    const text = DocumentApp.openById(id).getBody().getText();
+    return {ok: true, text: text};
+  } catch (err) {
+    if (err && err.userMessage) throw err;
+    fail_('사진에서 글자를 읽지 못했어요. 더 밝고 반듯하게 찍은 사진으로 다시 해 주세요.');
+  } finally {
+    if (id) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} }
+  }
+}
+
 /* ---------------- 시트 읽기·쓰기 ---------------- */
 function sheet_(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheetByName(name) || ensureSheet_(ss, name, name === SHEET_STUDENTS ? STUDENT_HEADERS : LOG_HEADERS);
+  return ss.getSheetByName(name) || ensureSheet_(ss, name, name === SHEET_STUDENTS ? STUDENT_HEADERS : name === SHEET_SETS ? SET_HEADERS : LOG_HEADERS);
 }
 function findStudentRow_(sh, sid) {
   const n = sh.getLastRow(); if (n < 2) return 0;
